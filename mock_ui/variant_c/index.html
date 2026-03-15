@@ -1,0 +1,2227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ПРАВО ПРОСТО — Стань цифровым героем!</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===== RESET & BASE ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Baloo 2', cursive, sans-serif;
+  background: #FFFBEB;
+  color: #1E293B;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* ===== CSS VARIABLES ===== */
+:root {
+  --teal: #0D9488;
+  --teal-dark: #0A7A70;
+  --blue: #3B82F6;
+  --orange: #F97316;
+  --orange-dark: #E56308;
+  --pink: #EC4899;
+  --bg: #FFFBEB;
+  --dark: #1E293B;
+  --dark-mid: #334155;
+  --lime: #84CC16;
+  --red: #EF4444;
+  --yellow: #EAB308;
+  --border: 3px solid #1E293B;
+  --border-thick: 4px solid #1E293B;
+  --shadow-comic: 5px 5px 0 #1E293B;
+  --shadow-comic-sm: 3px 3px 0 #1E293B;
+  --radius: 12px;
+}
+
+/* ===== HALFTONE PATTERN ===== */
+.halftone {
+  background-image: radial-gradient(circle, #1E293B 1px, transparent 1px);
+  background-size: 12px 12px;
+  opacity: 0.06;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ===== SCREEN MANAGEMENT ===== */
+.screen {
+  display: none;
+  min-height: 100vh;
+  position: relative;
+  animation: screenIn 0.4s ease-out;
+}
+.screen.active { display: block; }
+
+@keyframes screenIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== COMMON COMPONENTS ===== */
+
+/* Comic Panel */
+.comic-panel {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-comic);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Speech Bubble */
+.speech-bubble {
+  background: #fff;
+  border: var(--border);
+  border-radius: 18px;
+  padding: 16px 20px;
+  position: relative;
+  font-size: 1rem;
+  line-height: 1.5;
+  box-shadow: var(--shadow-comic-sm);
+}
+.speech-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -16px;
+  left: 30px;
+  width: 0; height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 16px solid #fff;
+  filter: drop-shadow(2px 2px 0 #1E293B);
+}
+.speech-bubble::before {
+  content: '';
+  position: absolute;
+  bottom: -20px;
+  left: 28px;
+  width: 0; height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-top: 20px solid #1E293B;
+}
+
+/* Comic Burst */
+.comic-burst {
+  display: inline-block;
+  background: var(--yellow);
+  border: var(--border);
+  padding: 6px 18px;
+  font-weight: 800;
+  font-size: 0.85rem;
+  transform: rotate(-3deg);
+  box-shadow: var(--shadow-comic-sm);
+  clip-path: polygon(
+    0% 20%, 8% 0%, 16% 18%, 28% 2%, 36% 20%, 50% 4%,
+    62% 18%, 72% 0%, 82% 16%, 92% 2%, 100% 20%,
+    98% 40%, 100% 60%, 96% 78%, 100% 100%,
+    82% 88%, 68% 100%, 52% 86%, 38% 100%, 22% 88%,
+    8% 100%, 0% 82%, 4% 60%, 0% 40%
+  );
+  min-width: 90px;
+  text-align: center;
+}
+
+/* Buttons */
+.btn {
+  font-family: 'Baloo 2', cursive;
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 14px 32px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-comic);
+  transition: all 0.15s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: relative;
+  transform: rotate(-0.5deg);
+}
+.btn:hover {
+  transform: rotate(0deg) translateY(-2px);
+  box-shadow: 7px 7px 0 #1E293B;
+}
+.btn:active {
+  transform: translateY(2px) rotate(0deg);
+  box-shadow: 2px 2px 0 #1E293B;
+}
+.btn-primary {
+  background: var(--orange);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--orange-dark); }
+.btn-teal {
+  background: var(--teal);
+  color: #fff;
+}
+.btn-teal:hover { background: var(--teal-dark); }
+.btn-dark {
+  background: var(--dark);
+  color: #fff;
+}
+.btn-outline {
+  background: #fff;
+  color: var(--dark);
+}
+.btn-outline:hover { background: #f1f5f9; }
+.btn-sm {
+  padding: 8px 18px;
+  font-size: 0.9rem;
+}
+.btn-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Progress Bar */
+.progress-bar {
+  width: 100%;
+  height: 18px;
+  background: #e2e8f0;
+  border: 2px solid var(--dark);
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 8px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--teal),
+    var(--teal) 8px,
+    var(--teal-dark) 8px,
+    var(--teal-dark) 16px
+  );
+  background-size: 22.6px 100%;
+  animation: stripesMove 1s linear infinite;
+  transition: width 0.6s ease;
+}
+@keyframes stripesMove {
+  0% { background-position: 0 0; }
+  100% { background-position: 22.6px 0; }
+}
+
+/* HUD Bar */
+.hud-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--dark);
+  border-bottom: var(--border-thick);
+  padding: 10px 20px;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.hud-bar .hud-left { display: flex; align-items: center; gap: 12px; }
+.hud-bar .hud-center { flex: 1; max-width: 300px; margin: 0 16px; }
+.hud-bar .hud-right { display: flex; align-items: center; gap: 16px; font-weight: 700; }
+.hud-close {
+  background: none; border: none; color: #fff; font-size: 1.4rem;
+  cursor: pointer; padding: 4px 8px; font-family: 'Baloo 2', cursive;
+}
+.hud-close:hover { color: var(--red); }
+.hud-xp { color: var(--orange); }
+.hud-hearts { color: var(--pink); }
+.hud-streak { color: var(--yellow); }
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border: 2px solid var(--dark);
+}
+.badge-orange { background: var(--orange); color: #fff; }
+.badge-teal { background: var(--teal); color: #fff; }
+.badge-pink { background: var(--pink); color: #fff; }
+.badge-lime { background: var(--lime); color: var(--dark); }
+.badge-dark { background: var(--dark); color: #fff; }
+
+/* ===== ANIMATIONS ===== */
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px) rotate(-1deg); }
+  40% { transform: translateX(8px) rotate(1deg); }
+  60% { transform: translateX(-6px) rotate(-0.5deg); }
+  80% { transform: translateX(6px) rotate(0.5deg); }
+}
+@keyframes bounceIn {
+  0% { transform: scale(0.3); opacity: 0; }
+  50% { transform: scale(1.1); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes floatUp {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes spinShield {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes confettiFall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 8px var(--blue), 0 0 20px rgba(59,130,246,0.3); }
+  50% { box-shadow: 0 0 16px var(--blue), 0 0 40px rgba(59,130,246,0.5); }
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes burstScale {
+  0% { transform: scale(0) rotate(-10deg); }
+  60% { transform: scale(1.2) rotate(3deg); }
+  100% { transform: scale(1) rotate(-2deg); }
+}
+
+.anim-shake { animation: shake 0.5s ease-in-out; }
+.anim-bounce { animation: bounceIn 0.6s ease-out; }
+.anim-float { animation: floatUp 0.5s ease-out; }
+.anim-burst { animation: burstScale 0.5s ease-out; }
+
+/* ===== RESPONSIVE CONTAINER ===== */
+.container {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+@media (min-width: 1024px) {
+  .container { max-width: 960px; }
+  .container-narrow { max-width: 640px; }
+}
+
+/* =============================================================
+   SCREEN 1: LANDING PAGE
+   ============================================================= */
+.landing {
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+.landing-hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 40px 20px;
+  position: relative;
+  background: linear-gradient(135deg, var(--teal) 0%, var(--teal) 50%, var(--orange) 50%, var(--orange) 100%);
+}
+.landing-hero .halftone { opacity: 0.1; }
+.landing-hero-content {
+  position: relative;
+  z-index: 2;
+}
+.landing-logo {
+  font-size: clamp(2.8rem, 8vw, 5rem);
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 4px 4px 0 var(--dark), -1px -1px 0 var(--dark), 1px -1px 0 var(--dark), -1px 1px 0 var(--dark);
+  letter-spacing: 2px;
+  line-height: 1.1;
+  margin-bottom: 16px;
+  transform: rotate(-2deg);
+}
+.landing-logo span {
+  display: block;
+  font-size: 0.35em;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: var(--yellow);
+  text-shadow: 2px 2px 0 var(--dark);
+}
+.landing-subtitle {
+  font-size: clamp(1rem, 3vw, 1.4rem);
+  color: #fff;
+  max-width: 500px;
+  margin: 0 auto 32px;
+  font-weight: 600;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.3);
+  line-height: 1.4;
+}
+.landing-shield {
+  width: 120px;
+  height: 120px;
+  background: var(--blue);
+  border: var(--border-thick);
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  margin: 0 auto 24px;
+  box-shadow: var(--shadow-comic);
+  position: relative;
+}
+.landing-shield::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 3px solid rgba(255,255,255,0.4);
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+}
+.landing-cta {
+  font-size: 1.3rem;
+  padding: 18px 48px;
+  transform: rotate(-1deg);
+  animation: pulse 2s ease-in-out infinite;
+}
+.landing-cta:hover { animation: none; }
+
+/* Feature panels */
+.landing-features {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding: 60px 20px;
+  max-width: 960px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 2;
+}
+@media (min-width: 768px) {
+  .landing-features { grid-template-columns: repeat(3, 1fr); }
+}
+.feature-panel {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  background: #fff;
+  box-shadow: var(--shadow-comic);
+  transition: transform 0.2s;
+  position: relative;
+}
+.feature-panel:nth-child(1) { transform: rotate(-1deg); }
+.feature-panel:nth-child(2) { transform: rotate(0.5deg); }
+.feature-panel:nth-child(3) { transform: rotate(-0.7deg); }
+.feature-panel:hover { transform: rotate(0deg) scale(1.03); }
+.feature-icon {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  border: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  margin: 0 auto 12px;
+  box-shadow: var(--shadow-comic-sm);
+}
+.feature-panel:nth-child(1) .feature-icon { background: var(--teal); }
+.feature-panel:nth-child(2) .feature-icon { background: var(--orange); }
+.feature-panel:nth-child(3) .feature-icon { background: var(--blue); }
+.feature-panel h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.feature-panel p {
+  font-size: 0.9rem;
+  color: var(--dark-mid);
+  line-height: 1.4;
+}
+
+/* Mission briefing cards */
+.landing-missions {
+  padding: 40px 20px 80px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+.landing-missions h2 {
+  font-size: 1.8rem;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 32px;
+  text-transform: uppercase;
+  border-bottom: var(--border);
+  display: inline-block;
+  padding-bottom: 4px;
+}
+.mission-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+@media (min-width: 768px) {
+  .mission-cards { grid-template-columns: repeat(3, 1fr); }
+}
+.mission-card {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fff;
+  box-shadow: var(--shadow-comic);
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.mission-card:hover { transform: translateY(-4px) rotate(0.5deg); }
+.mission-card-img {
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  position: relative;
+}
+.mission-card-img::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(0,0,0,0.15) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+.mission-card:nth-child(1) .mission-card-img { background: linear-gradient(135deg, #0D9488, #3B82F6); }
+.mission-card:nth-child(2) .mission-card-img { background: linear-gradient(135deg, #F97316, #EAB308); }
+.mission-card:nth-child(3) .mission-card-img { background: linear-gradient(135deg, #3B82F6, #EC4899); }
+.mission-card-body {
+  padding: 16px;
+  border-top: var(--border);
+}
+.mission-card-body h4 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.mission-card-body p {
+  font-size: 0.85rem;
+  color: var(--dark-mid);
+}
+
+/* =============================================================
+   SCREEN 2: ROLE SELECTION
+   ============================================================= */
+.role-screen {
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 40px 20px;
+  position: relative;
+}
+.role-screen .halftone { opacity: 0.04; }
+.role-header {
+  text-align: center;
+  margin-bottom: 40px;
+  position: relative;
+  z-index: 2;
+}
+.role-header h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--dark);
+}
+.role-header p {
+  font-size: 1.1rem;
+  color: var(--dark-mid);
+  margin-top: 8px;
+}
+.role-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 2;
+}
+@media (min-width: 768px) {
+  .role-cards { grid-template-columns: repeat(3, 1fr); }
+}
+.role-card {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-comic);
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.role-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 6px;
+}
+.role-card:nth-child(1)::before { background: var(--teal); }
+.role-card:nth-child(2)::before { background: var(--orange); }
+.role-card:nth-child(3)::before { background: var(--blue); }
+.role-card:hover {
+  transform: translateY(-6px) rotate(1deg);
+  box-shadow: 8px 8px 0 var(--dark);
+}
+.role-card.selected {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal), var(--shadow-comic);
+}
+.role-card-icon {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  margin: 0 auto 16px;
+  box-shadow: var(--shadow-comic-sm);
+}
+.role-card:nth-child(1) .role-card-icon { background: linear-gradient(135deg, var(--teal), #34d399); }
+.role-card:nth-child(2) .role-card-icon { background: linear-gradient(135deg, var(--orange), var(--yellow)); }
+.role-card:nth-child(3) .role-card-icon { background: linear-gradient(135deg, var(--blue), var(--pink)); }
+.role-card h3 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.role-card p {
+  font-size: 0.9rem;
+  color: var(--dark-mid);
+  line-height: 1.4;
+}
+.role-card .role-age {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border: 2px solid var(--dark);
+  background: var(--bg);
+}
+.role-continue {
+  text-align: center;
+  margin-top: 32px;
+  position: relative;
+  z-index: 2;
+}
+
+/* =============================================================
+   SCREEN 3: COURSE CATALOG (MISSION BOARD)
+   ============================================================= */
+.catalog-screen { min-height: 100vh; background: var(--bg); }
+.catalog-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  padding: 24px 16px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+@media (min-width: 768px) {
+  .catalog-body { grid-template-columns: 2fr 1fr; }
+}
+.catalog-main h2 {
+  font-size: 1.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Dossier cards */
+.dossier {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-comic);
+  margin-bottom: 20px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s;
+  position: relative;
+}
+.dossier:hover { transform: translateY(-3px); }
+.dossier-header {
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 2px dashed #cbd5e1;
+}
+.dossier-stamp {
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  border: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-comic-sm);
+}
+.dossier:nth-child(1) .dossier-stamp { background: linear-gradient(135deg, var(--teal), var(--blue)); }
+.dossier:nth-child(2) .dossier-stamp { background: linear-gradient(135deg, var(--orange), var(--yellow)); }
+.dossier:nth-child(3) .dossier-stamp { background: linear-gradient(135deg, #94a3b8, #64748b); }
+.dossier-info h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.dossier-info .dossier-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--teal);
+  text-transform: uppercase;
+}
+.dossier-body { padding: 16px 20px; }
+.dossier-body p {
+  font-size: 0.9rem;
+  color: var(--dark-mid);
+  margin-bottom: 12px;
+}
+.dossier-new {
+  position: absolute;
+  top: -4px;
+  right: 12px;
+  z-index: 3;
+}
+.dossier-locked {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.dossier-locked .dossier-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.3);
+}
+.dossier-lock-icon {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  font-size: 1.6rem;
+  opacity: 0.6;
+}
+
+/* Sidebar hero card */
+.sidebar-hero {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  background: var(--dark);
+  color: #fff;
+  padding: 24px 20px;
+  text-align: center;
+  box-shadow: var(--shadow-comic);
+  margin-bottom: 20px;
+}
+.sidebar-avatar {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: 3px solid var(--orange);
+  background: linear-gradient(135deg, var(--teal), var(--blue));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  margin: 0 auto 12px;
+}
+.sidebar-hero h3 { font-size: 1.2rem; font-weight: 700; }
+.sidebar-hero .sidebar-rank {
+  color: var(--orange);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.sidebar-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+.sidebar-stat {
+  background: rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.sidebar-stat .stat-val {
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+.sidebar-stat .stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.sidebar-badges {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 20px;
+  box-shadow: var(--shadow-comic);
+}
+.sidebar-badges h4 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.badge-item {
+  width: 50px; height: 50px;
+  border-radius: 50%;
+  border: 2px solid var(--dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  box-shadow: 2px 2px 0 var(--dark);
+  margin: 0 auto;
+}
+.badge-item:nth-child(1) { background: var(--orange); }
+.badge-item:nth-child(2) { background: var(--teal); }
+.badge-item:nth-child(3) { background: var(--yellow); }
+.badge-item:nth-child(4) { background: var(--blue); }
+.badge-item:nth-child(5) { background: var(--pink); }
+.badge-item.badge-locked {
+  background: #e2e8f0;
+  opacity: 0.4;
+}
+
+/* =============================================================
+   SCREEN 4: LESSON TREE (MISSION MAP)
+   ============================================================= */
+.map-screen { min-height: 100vh; background: var(--bg); }
+.map-header {
+  background: var(--dark);
+  border-bottom: var(--border-thick);
+  padding: 20px;
+  text-align: center;
+  color: #fff;
+}
+.map-header h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--orange);
+  letter-spacing: 1px;
+}
+.map-header h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin-top: 4px;
+}
+.map-back {
+  background: none;
+  border: none;
+  color: #fff;
+  font-family: 'Baloo 2', cursive;
+  font-size: 1rem;
+  cursor: pointer;
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.map-back:hover { color: var(--orange); }
+.map-header-wrap { position: relative; }
+
+.map-body {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+  position: relative;
+}
+
+/* Trail line */
+.map-trail {
+  position: absolute;
+  left: 50%;
+  top: 40px;
+  bottom: 80px;
+  width: 4px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--dark) 0,
+    var(--dark) 8px,
+    transparent 8px,
+    transparent 16px
+  );
+  transform: translateX(-50%);
+  z-index: 0;
+}
+
+/* Map nodes */
+.map-node {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 48px;
+}
+.map-node:nth-child(odd) { flex-direction: row; }
+.map-node:nth-child(even) { flex-direction: row-reverse; }
+.map-node-circle {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  border: var(--border-thick);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+.map-node-done .map-node-circle {
+  background: var(--lime);
+  box-shadow: var(--shadow-comic-sm);
+}
+.map-node-current .map-node-circle {
+  background: var(--blue);
+  color: #fff;
+  animation: glowPulse 2s ease-in-out infinite;
+  box-shadow: 0 0 12px var(--blue);
+}
+.map-node-locked .map-node-circle {
+  background: #cbd5e1;
+  color: #94a3b8;
+  box-shadow: none;
+}
+.map-node-info {
+  flex: 1;
+}
+.map-node-info .comic-panel {
+  padding: 14px 18px;
+}
+.map-node-info h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.map-node-info p {
+  font-size: 0.8rem;
+  color: var(--dark-mid);
+}
+.map-node-done .map-node-info .badge { margin-top: 6px; }
+.map-node-current .map-node-info .btn { margin-top: 8px; font-size: 0.85rem; padding: 6px 16px; }
+.map-node-locked .map-node-info { opacity: 0.5; }
+
+/* =============================================================
+   SCREENS 5-9: LESSON PLAYER
+   ============================================================= */
+.lesson-screen { min-height: 100vh; background: var(--bg); }
+.lesson-body {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 24px 16px 100px;
+}
+
+/* Story panel */
+.story-panel {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fff;
+  box-shadow: var(--shadow-comic);
+  margin-bottom: 24px;
+}
+.story-illustration {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 4rem;
+  position: relative;
+  overflow: hidden;
+}
+.story-illustration::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(0,0,0,0.12) 1.5px, transparent 1.5px);
+  background-size: 10px 10px;
+}
+.story-text {
+  padding: 20px;
+  border-top: var(--border);
+}
+.story-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--teal);
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+/* Question area */
+.question-area {
+  margin-bottom: 24px;
+}
+.question-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  text-align: center;
+  color: var(--dark);
+}
+
+/* Option cards */
+.option-card {
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: var(--shadow-comic-sm);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-weight: 600;
+  font-size: 1rem;
+}
+.option-card:hover {
+  transform: translateX(4px);
+  border-color: var(--blue);
+}
+.option-card.selected {
+  border-color: var(--blue);
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px var(--blue), var(--shadow-comic-sm);
+}
+.option-card.correct {
+  border-color: var(--lime);
+  background: #f0fdf4;
+  box-shadow: 0 0 0 2px var(--lime), var(--shadow-comic-sm);
+}
+.option-card.incorrect {
+  border-color: var(--red);
+  background: #fef2f2;
+  box-shadow: 0 0 0 2px var(--red), var(--shadow-comic-sm);
+}
+.option-marker {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  background: #f8fafc;
+}
+.option-card.selected .option-marker { background: var(--blue); color: #fff; border-color: var(--blue); }
+.option-card.correct .option-marker { background: var(--lime); color: var(--dark); border-color: var(--lime); }
+.option-card.incorrect .option-marker { background: var(--red); color: #fff; border-color: var(--red); }
+
+/* Free text */
+.free-text-area {
+  margin-bottom: 24px;
+}
+.free-text-area textarea {
+  width: 100%;
+  min-height: 120px;
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  font-family: 'Baloo 2', cursive;
+  font-size: 1rem;
+  resize: vertical;
+  box-shadow: var(--shadow-comic-sm);
+  background: #fff;
+}
+.free-text-area textarea:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue), var(--shadow-comic-sm);
+}
+
+/* Lesson bottom bar */
+.lesson-bottom {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border-top: var(--border-thick);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: center;
+  z-index: 90;
+}
+
+/* Feedback panel */
+.feedback-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 24px 20px;
+  border-top: var(--border-thick);
+  z-index: 95;
+  animation: slideUp 0.35s ease-out;
+  display: none;
+}
+.feedback-panel.show { display: block; }
+.feedback-panel.correct-fb { background: #dcfce7; }
+.feedback-panel.incorrect-fb { background: #fee2e2; }
+.feedback-panel.partial-fb { background: #fef9c3; }
+.feedback-content {
+  max-width: 560px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.feedback-burst {
+  font-size: 1.6rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.feedback-text {
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.feedback-xp {
+  font-weight: 800;
+  font-size: 1.1rem;
+  white-space: nowrap;
+}
+.correct-fb .feedback-burst { color: #15803d; }
+.incorrect-fb .feedback-burst { color: var(--red); }
+.partial-fb .feedback-burst { color: #a16207; }
+.correct-fb .feedback-xp { color: var(--orange); }
+.incorrect-fb .feedback-xp { color: var(--red); }
+.partial-fb .feedback-xp { color: var(--orange); }
+.feedback-btn {
+  margin-top: 12px;
+}
+
+/* Loader */
+.loader-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255,251,235,0.9);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  flex-direction: column;
+  gap: 16px;
+}
+.loader-overlay.show { display: flex; }
+.loader-shield {
+  width: 64px; height: 64px;
+  background: var(--blue);
+  border: var(--border);
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  animation: spinShield 1s linear infinite;
+}
+.loader-text {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+/* =============================================================
+   SCREEN 9: MISSION COMPLETE
+   ============================================================= */
+.complete-screen {
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--dark) 0%, #0f172a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 20px;
+  position: relative;
+  overflow: hidden;
+}
+.complete-content {
+  position: relative;
+  z-index: 5;
+}
+.complete-burst {
+  font-size: clamp(2rem, 7vw, 3.5rem);
+  font-weight: 800;
+  color: var(--yellow);
+  text-shadow: 3px 3px 0 var(--orange), 6px 6px 0 rgba(0,0,0,0.3);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  animation: bounceIn 0.6s ease-out;
+  transform: rotate(-2deg);
+}
+.complete-sub {
+  font-size: 1.1rem;
+  color: rgba(255,255,255,0.8);
+  margin-bottom: 32px;
+}
+.complete-xp {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--orange);
+  text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+  margin-bottom: 24px;
+  animation: bounceIn 0.6s ease-out 0.2s both;
+}
+.complete-stats {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 32px;
+  animation: floatUp 0.5s ease-out 0.4s both;
+}
+.complete-stat {
+  text-align: center;
+}
+.complete-stat-val {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #fff;
+}
+.complete-stat-label {
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+}
+.complete-btn {
+  animation: floatUp 0.5s ease-out 0.6s both;
+}
+.complete-shield {
+  width: 100px; height: 100px;
+  background: var(--blue);
+  border: var(--border-thick);
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.8rem;
+  margin: 0 auto 24px;
+  box-shadow: 0 0 30px rgba(59,130,246,0.5);
+  animation: bounceIn 0.6s ease-out;
+}
+
+/* Confetti */
+.confetti-piece {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  top: -10px;
+  z-index: 10;
+  animation: confettiFall linear forwards;
+}
+
+/* =============================================================
+   SCREEN 10: HERO PROFILE
+   ============================================================= */
+.profile-screen { min-height: 100vh; background: var(--bg); }
+.profile-header {
+  background: var(--dark);
+  border-bottom: var(--border-thick);
+  padding: 32px 20px;
+  text-align: center;
+  color: #fff;
+  position: relative;
+}
+.profile-header h1 {
+  font-size: 1.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--orange);
+}
+.profile-back {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #fff;
+  font-family: 'Baloo 2', cursive;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.profile-back:hover { color: var(--orange); }
+
+.profile-body {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+.profile-card {
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  background: var(--dark);
+  color: #fff;
+  padding: 32px 24px;
+  text-align: center;
+  box-shadow: var(--shadow-comic);
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+.profile-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+.profile-avatar {
+  width: 100px; height: 100px;
+  border-radius: 50%;
+  border: 4px solid var(--orange);
+  background: linear-gradient(135deg, var(--teal), var(--blue));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  margin: 0 auto 16px;
+  position: relative;
+  z-index: 2;
+}
+.profile-name {
+  font-size: 1.6rem;
+  font-weight: 800;
+  position: relative;
+  z-index: 2;
+}
+.profile-rank {
+  font-size: 1rem;
+  color: var(--orange);
+  font-weight: 600;
+  position: relative;
+  z-index: 2;
+}
+
+.profile-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+}
+@media (min-width: 640px) {
+  .profile-stats-grid { grid-template-columns: repeat(4, 1fr); }
+}
+.profile-stat-card {
+  border: var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 18px 12px;
+  text-align: center;
+  box-shadow: var(--shadow-comic-sm);
+}
+.profile-stat-card .psc-icon {
+  font-size: 1.4rem;
+  margin-bottom: 4px;
+}
+.profile-stat-card .psc-val {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--dark);
+}
+.profile-stat-card .psc-label {
+  font-size: 0.75rem;
+  color: var(--dark-mid);
+  text-transform: uppercase;
+}
+
+.profile-section {
+  margin-bottom: 24px;
+}
+.profile-section h3 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.achievement-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (min-width: 640px) {
+  .achievement-grid { grid-template-columns: repeat(5, 1fr); }
+}
+.achievement-item {
+  border: var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 14px 8px;
+  text-align: center;
+  box-shadow: var(--shadow-comic-sm);
+}
+.achievement-item .ach-icon {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  border: 2px solid var(--dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  margin: 0 auto 6px;
+  box-shadow: 2px 2px 0 var(--dark);
+}
+.achievement-item:nth-child(1) .ach-icon { background: var(--orange); }
+.achievement-item:nth-child(2) .ach-icon { background: var(--teal); }
+.achievement-item:nth-child(3) .ach-icon { background: var(--yellow); }
+.achievement-item:nth-child(4) .ach-icon { background: var(--blue); }
+.achievement-item:nth-child(5) .ach-icon { background: var(--pink); }
+.achievement-item.ach-locked {
+  opacity: 0.4;
+}
+.achievement-item.ach-locked .ach-icon { background: #e2e8f0; }
+.achievement-item .ach-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--dark);
+  line-height: 1.2;
+}
+
+.mission-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mission-progress-item {
+  border: var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 16px;
+  box-shadow: var(--shadow-comic-sm);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.mpi-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  border: 2px solid var(--dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+.mpi-info { flex: 1; }
+.mpi-info h4 { font-size: 0.95rem; font-weight: 700; }
+.mpi-info .progress-bar { height: 12px; margin-top: 6px; }
+.mpi-pct {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--teal);
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================= -->
+<!-- SCREEN 1: LANDING PAGE -->
+<!-- ============================================================= -->
+<div class="screen active" id="screen-landing">
+  <div class="landing">
+    <div class="landing-hero">
+      <div class="halftone"></div>
+      <div class="landing-hero-content">
+        <div class="landing-shield">&#x1F6E1;</div>
+        <h1 class="landing-logo">
+          ПРАВО<br>ПРОСТО
+          <span>&#9733; EdTech для героев &#9733;</span>
+        </h1>
+        <p class="landing-subtitle">Стань цифровым героем! Учись защищать себя и других через захватывающие миссии</p>
+        <button class="btn btn-primary landing-cta" onclick="goTo('screen-role')">НАЧАТЬ МИССИЮ</button>
+      </div>
+    </div>
+
+    <div class="landing-features">
+      <div class="feature-panel">
+        <div class="feature-icon">&#x1F6E1;</div>
+        <h3>Миссии-уроки</h3>
+        <p>Каждый урок &#8212; это захватывающая миссия с сюжетом и заданиями</p>
+      </div>
+      <div class="feature-panel">
+        <div class="feature-icon">&#9889;</div>
+        <h3>XP и награды</h3>
+        <p>Зарабатывай очки опыта, открывай достижения и становись сильнее</p>
+      </div>
+      <div class="feature-panel">
+        <div class="feature-icon">&#x1F4AA;</div>
+        <h3>Реальные знания</h3>
+        <p>Учись распознавать мошенников, знай свои права и защищай себя в сети</p>
+      </div>
+    </div>
+
+    <div class="landing-missions">
+      <h2>&#128270; Предстоящие миссии</h2>
+      <div class="mission-cards">
+        <div class="mission-card" onclick="goTo('screen-role')">
+          <div class="mission-card-img">&#x1F575;</div>
+          <div class="mission-card-body">
+            <h4>Мошенники в интернете</h4>
+            <p>Научись распознавать обман и ловушки</p>
+          </div>
+        </div>
+        <div class="mission-card" onclick="goTo('screen-role')">
+          <div class="mission-card-img">&#9878;</div>
+          <div class="mission-card-body">
+            <h4>Мои права</h4>
+            <p>Узнай, какие у тебя есть права</p>
+          </div>
+        </div>
+        <div class="mission-card" onclick="goTo('screen-role')">
+          <div class="mission-card-img">&#x1F4B0;</div>
+          <div class="mission-card-body">
+            <h4>Деньги и покупки</h4>
+            <p>Научись обращаться с деньгами безопасно</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- SCREEN 2: ROLE SELECTION -->
+<!-- ============================================================= -->
+<div class="screen" id="screen-role">
+  <div class="role-screen">
+    <div class="halftone"></div>
+    <div class="role-header">
+      <h1>Выбери свою роль:</h1>
+      <p>Каждый герой начинает свой путь с выбора</p>
+    </div>
+    <div class="role-cards">
+      <div class="role-card" onclick="selectRole(this)">
+        <div class="role-card-icon">&#x1F9D1;&#8205;&#x1F393;</div>
+        <h3>Юный страж</h3>
+        <p>Только начинаешь свой путь героя. Простые миссии, понятные задания</p>
+        <div class="role-age">7-9 лет</div>
+      </div>
+      <div class="role-card" onclick="selectRole(this)">
+        <div class="role-card-icon">&#x1F9B8;</div>
+        <h3>Защитник</h3>
+        <p>Уже кое-что знаешь и готов к серьёзным миссиям. Средний уровень сложности</p>
+        <div class="role-age">10-12 лет</div>
+      </div>
+      <div class="role-card" onclick="selectRole(this)">
+        <div class="role-card-icon">&#x1F9D9;</div>
+        <h3>Кибер-мастер</h3>
+        <p>Продвинутый уровень. Сложные кейсы и настоящие правовые ситуации</p>
+        <div class="role-age">13-15 лет</div>
+      </div>
+    </div>
+    <div class="role-continue">
+      <button class="btn btn-primary" onclick="goTo('screen-catalog')">ПРОДОЛЖИТЬ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- SCREEN 3: COURSE CATALOG (MISSION BOARD) -->
+<!-- ============================================================= -->
+<div class="screen" id="screen-catalog">
+  <div class="catalog-screen">
+    <div class="hud-bar">
+      <div class="hud-left">
+        <button class="hud-close" onclick="goTo('screen-landing')" title="На главную">&#x2190;</button>
+        <span style="font-weight:800; text-transform:uppercase; letter-spacing:1px;">&#x1F6E1; Штаб Героя</span>
+      </div>
+      <div class="hud-right">
+        <span class="hud-xp">&#9889; <span id="hud-xp-val">120</span> XP</span>
+        <span class="hud-streak">&#x1F525; 5</span>
+        <span class="hud-hearts">&#10084; <span id="hud-hearts-val">5</span></span>
+      </div>
+    </div>
+    <div class="catalog-body">
+      <div class="catalog-main">
+        <h2>&#x1F4CB; Доска миссий</h2>
+
+        <!-- Mission 1 -->
+        <div class="dossier" onclick="goTo('screen-map')">
+          <div class="dossier-header">
+            <div class="dossier-stamp">&#x1F575;</div>
+            <div class="dossier-info">
+              <div class="dossier-label">Миссия 1</div>
+              <h3>Мошенники в интернете</h3>
+            </div>
+          </div>
+          <div class="dossier-body">
+            <p>Научись распознавать мошеннические схемы, фишинговые ссылки и поддельные сообщения</p>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width:40%"></div>
+            </div>
+            <div style="margin-top:6px; font-size:0.85rem; font-weight:700; color:var(--teal);">40% выполнено</div>
+          </div>
+        </div>
+
+        <!-- Mission 2 -->
+        <div class="dossier">
+          <div class="dossier-new">
+            <div class="comic-burst" style="font-size:0.75rem; padding:10px 20px;">НОВАЯ!</div>
+          </div>
+          <div class="dossier-header">
+            <div class="dossier-stamp">&#9878;</div>
+            <div class="dossier-info">
+              <div class="dossier-label" style="color:var(--orange);">Миссия 2</div>
+              <h3>Мои права</h3>
+            </div>
+          </div>
+          <div class="dossier-body">
+            <p>Узнай о своих правах в школе, дома и в интернете. Научись их защищать</p>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width:0%"></div>
+            </div>
+            <div style="margin-top:6px; font-size:0.85rem; font-weight:700; color:var(--dark-mid);">Не начата</div>
+          </div>
+        </div>
+
+        <!-- Mission 3 -->
+        <div class="dossier dossier-locked">
+          <div class="dossier-lock-icon">&#x1F512;</div>
+          <div class="dossier-header">
+            <div class="dossier-stamp">&#x1F4B0;</div>
+            <div class="dossier-info">
+              <div class="dossier-label" style="color:#94a3b8;">Миссия 3</div>
+              <h3>Деньги и покупки</h3>
+            </div>
+          </div>
+          <div class="dossier-body">
+            <p>Безопасные покупки в интернете, карманные деньги и финансовая грамотность</p>
+            <div style="font-size:0.85rem; font-weight:700; color:#94a3b8;">&#x1F512; Заблокировано</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="catalog-sidebar">
+        <div class="sidebar-hero">
+          <div class="sidebar-avatar">&#x1F9B8;</div>
+          <h3>Алиса</h3>
+          <div class="sidebar-rank">Защитник 3 уровня</div>
+          <div class="sidebar-stats">
+            <div class="sidebar-stat">
+              <div class="stat-val" style="color:var(--orange);">120</div>
+              <div class="stat-label">XP</div>
+            </div>
+            <div class="sidebar-stat">
+              <div class="stat-val" style="color:var(--yellow);">5</div>
+              <div class="stat-label">Серия</div>
+            </div>
+            <div class="sidebar-stat">
+              <div class="stat-val" style="color:var(--lime);">3</div>
+              <div class="stat-label">Уровень</div>
+            </div>
+            <div class="sidebar-stat">
+              <div class="stat-val" style="color:var(--blue);">2</div>
+              <div class="stat-label">Миссии</div>
+            </div>
+          </div>
+        </div>
+        <div class="sidebar-badges">
+          <h4>&#x1F3C5; Награды</h4>
+          <div class="badge-grid">
+            <div class="badge-item">&#9889;</div>
+            <div class="badge-item">&#x1F6E1;</div>
+            <div class="badge-item">&#9733;</div>
+            <div class="badge-item">&#x1F525;</div>
+            <div class="badge-item badge-locked">?</div>
+            <div class="badge-item badge-locked">?</div>
+          </div>
+        </div>
+        <div style="margin-top:16px; text-align:center;">
+          <button class="btn btn-dark btn-sm" onclick="goTo('screen-profile')">&#x1F4CB; Досье героя</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- SCREEN 4: LESSON TREE (MISSION MAP) -->
+<!-- ============================================================= -->
+<div class="screen" id="screen-map">
+  <div class="map-screen">
+    <div class="map-header-wrap">
+      <div class="map-header">
+        <button class="map-back" onclick="goTo('screen-catalog')">&#x2190; Назад</button>
+        <h2>Операция:</h2>
+        <h1>Подозрительные ссылки</h1>
+      </div>
+    </div>
+    <div class="map-body">
+      <div class="map-trail"></div>
+
+      <!-- Node 1: Done -->
+      <div class="map-node map-node-done">
+        <div class="map-node-circle">&#10004;</div>
+        <div class="map-node-info">
+          <div class="comic-panel">
+            <h4>Что такое фишинг?</h4>
+            <p>Основы интернет-мошенничества</p>
+            <span class="badge badge-lime" style="margin-top:6px; display:inline-block;">ВЫПОЛНЕНО</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Node 2: Done -->
+      <div class="map-node map-node-done">
+        <div class="map-node-circle">&#10004;</div>
+        <div class="map-node-info">
+          <div class="comic-panel">
+            <h4>Как выглядят ловушки</h4>
+            <p>Учимся замечать подозрительное</p>
+            <span class="badge badge-lime" style="margin-top:6px; display:inline-block;">ВЫПОЛНЕНО</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Node 3: Current -->
+      <div class="map-node map-node-current">
+        <div class="map-node-circle">3</div>
+        <div class="map-node-info">
+          <div class="comic-panel">
+            <h4>Подозрительное сообщение</h4>
+            <p>Практика: что делать с подозрительными SMS</p>
+            <button class="btn btn-primary btn-sm" onclick="startLesson()">НАЧАТЬ МИССИЮ</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Node 4: Locked -->
+      <div class="map-node map-node-locked">
+        <div class="map-node-circle">&#x1F512;</div>
+        <div class="map-node-info">
+          <div class="comic-panel">
+            <h4>Безопасный пароль</h4>
+            <p>Создаём надёжные пароли</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Node 5: Locked -->
+      <div class="map-node map-node-locked">
+        <div class="map-node-circle">&#x1F512;</div>
+        <div class="map-node-info">
+          <div class="comic-panel">
+            <h4>Финальная миссия</h4>
+            <p>Проверка всех знаний</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- SCREENS 5-9: LESSON PLAYER -->
+<!-- ============================================================= -->
+
+<!-- STEP 1: Story -->
+<div class="screen" id="screen-lesson-1">
+  <div class="lesson-screen">
+    <div class="hud-bar">
+      <div class="hud-left">
+        <button class="hud-close" onclick="exitLesson()">&#10005;</button>
+      </div>
+      <div class="hud-center">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:20%"></div>
+        </div>
+      </div>
+      <div class="hud-right">
+        <span class="hud-hearts">&#10084; <span class="lesson-hearts">5</span></span>
+      </div>
+    </div>
+    <div class="lesson-body">
+      <div class="story-panel">
+        <div class="story-illustration" style="background: linear-gradient(135deg, #0D9488, #3B82F6);">
+          &#x1F4F1;
+        </div>
+        <div class="story-text">
+          <div class="story-label">&#x1F4D6; История миссии</div>
+          <div class="speech-bubble">
+            Тебе пришло сообщение от незнакомого номера: <strong>&#171;Поздравляем! Вы выиграли iPhone! Перейдите по ссылке, чтобы забрать приз: super-prize.xyz/win&#187;</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="lesson-bottom">
+      <button class="btn btn-primary" onclick="goTo('screen-lesson-2')">ДАЛЕЕ &#8594;</button>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 2: Single choice -->
+<div class="screen" id="screen-lesson-2">
+  <div class="lesson-screen">
+    <div class="hud-bar">
+      <div class="hud-left">
+        <button class="hud-close" onclick="exitLesson()">&#10005;</button>
+      </div>
+      <div class="hud-center">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:40%"></div>
+        </div>
+      </div>
+      <div class="hud-right">
+        <span class="hud-hearts">&#10084; <span class="lesson-hearts">5</span></span>
+      </div>
+    </div>
+    <div class="lesson-body">
+      <div class="question-area">
+        <div class="question-title">Что ты сделаешь, герой?</div>
+        <div class="option-card" data-correct="false" onclick="selectOption(this)">
+          <div class="option-marker">A</div>
+          <span>Перейду по ссылке &#8212; вдруг правда приз!</span>
+        </div>
+        <div class="option-card" data-correct="true" onclick="selectOption(this)">
+          <div class="option-marker">&#1041;</div>
+          <span>Покажу сообщение родителям</span>
+        </div>
+        <div class="option-card" data-correct="false" onclick="selectOption(this)">
+          <div class="option-marker">&#1042;</div>
+          <span>Отвечу на сообщение</span>
+        </div>
+      </div>
+    </div>
+    <div class="lesson-bottom">
+      <button class="btn btn-teal" id="check-btn" onclick="checkAnswer()">ПРОВЕРИТЬ</button>
+    </div>
+    <!-- Feedback -->
+    <div class="feedback-panel" id="feedback-2">
+      <div class="feedback-content">
+        <div class="feedback-burst" id="fb2-burst"></div>
+        <div class="feedback-text" id="fb2-text"></div>
+        <div class="feedback-xp" id="fb2-xp"></div>
+      </div>
+      <div style="text-align:center; margin-top:12px;">
+        <button class="btn btn-primary btn-sm feedback-btn" onclick="closeFeedback('feedback-2'); goTo('screen-lesson-3');">ДАЛЕЕ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 3: Story continuation -->
+<div class="screen" id="screen-lesson-3">
+  <div class="lesson-screen">
+    <div class="hud-bar">
+      <div class="hud-left">
+        <button class="hud-close" onclick="exitLesson()">&#10005;</button>
+      </div>
+      <div class="hud-center">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:60%"></div>
+        </div>
+      </div>
+      <div class="hud-right">
+        <span class="hud-hearts">&#10084; <span class="lesson-hearts">5</span></span>
+      </div>
+    </div>
+    <div class="lesson-body">
+      <div class="story-panel">
+        <div class="story-illustration" style="background: linear-gradient(135deg, #F97316, #EAB308);">
+          &#x1F9D1;&#8205;&#x1F4BB;
+        </div>
+        <div class="story-text">
+          <div class="story-label">&#x1F4D6; Продолжение</div>
+          <div class="speech-bubble">
+            Отлично! Ты показал сообщение родителям. Они подтвердили, что это <strong>мошенническая схема</strong>. Такие сообщения присылают тысячам людей, чтобы украсть их данные. Теперь давай разберёмся, <strong>почему</strong> нельзя переходить по таким ссылкам.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="lesson-bottom">
+      <button class="btn btn-primary" onclick="goTo('screen-lesson-4')">ДАЛЕЕ &#8594;</button>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 4: Free text -->
+<div class="screen" id="screen-lesson-4">
+  <div class="lesson-screen">
+    <div class="hud-bar">
+      <div class="hud-left">
+        <button class="hud-close" onclick="exitLesson()">&#10005;</button>
+      </div>
+      <div class="hud-center">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:80%"></div>
+        </div>
+      </div>
+      <div class="hud-right">
+        <span class="hud-hearts">&#10084; <span class="lesson-hearts">5</span></span>
+      </div>
+    </div>
+    <div class="lesson-body">
+      <div class="question-area">
+        <div class="question-title">Объясни своими словами</div>
+        <div class="free-text-area">
+          <div class="speech-bubble" style="margin-bottom:20px;">
+            Почему нельзя переходить по незнакомым ссылкам? Напиши своё объяснение &#8212; как будто объясняешь другу.
+          </div>
+          <textarea id="free-text-input" placeholder="Напиши своё объяснение здесь..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="lesson-bottom">
+      <button class="btn btn-teal" onclick="submitFreeText()">ОТПРАВИТЬ</button>
+    </div>
+    <!-- Feedback -->
+    <div class="feedback-panel partial-fb" id="feedback-4">
+      <div class="feedback-content">
+        <div class="feedback-burst">ПОЧТИ! &#9889;</div>
+        <div class="feedback-text">Хорошее объяснение! Ты правильно понимаешь суть. Мошенники могут украсть пароли, деньги и личные данные через поддельные сайты.</div>
+        <div class="feedback-xp" style="color:var(--orange);">+5 XP</div>
+      </div>
+      <div style="text-align:center; margin-top:12px;">
+        <button class="btn btn-primary btn-sm feedback-btn" onclick="closeFeedback('feedback-4'); goTo('screen-lesson-5');">ДАЛЕЕ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 5: Complete -->
+<div class="screen" id="screen-lesson-5">
+  <div class="complete-screen">
+    <div class="halftone" style="opacity:0.05;"></div>
+    <div id="confetti-container"></div>
+    <div class="complete-content">
+      <div class="complete-shield">&#x1F6E1;</div>
+      <div class="complete-burst">МИССИЯ ВЫПОЛНЕНА!</div>
+      <div class="complete-sub">Ты успешно разобрался с подозрительным сообщением</div>
+      <div class="complete-xp">+30 XP</div>
+      <div class="complete-stats">
+        <div class="complete-stat">
+          <div class="complete-stat-val">3/3</div>
+          <div class="complete-stat-label">Верно</div>
+        </div>
+        <div class="complete-stat">
+          <div class="complete-stat-val" style="color:var(--pink);">&#10084; 5</div>
+          <div class="complete-stat-label">Осталось</div>
+        </div>
+        <div class="complete-stat">
+          <div class="complete-stat-val" style="color:var(--yellow);">&#9733;</div>
+          <div class="complete-stat-label">Идеально</div>
+        </div>
+      </div>
+      <div class="complete-btn">
+        <button class="btn btn-primary" onclick="goTo('screen-catalog')">СЛЕДУЮЩАЯ МИССИЯ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- SCREEN 10: HERO PROFILE -->
+<!-- ============================================================= -->
+<div class="screen" id="screen-profile">
+  <div class="profile-screen">
+    <div class="profile-header">
+      <button class="profile-back" onclick="goTo('screen-catalog')">&#x2190; Назад</button>
+      <h1>&#x1F4CB; Досье героя</h1>
+    </div>
+    <div class="profile-body">
+      <div class="profile-card">
+        <div class="profile-avatar">&#x1F9B8;</div>
+        <div class="profile-name">Алиса</div>
+        <div class="profile-rank">Защитник 3 уровня</div>
+      </div>
+
+      <div class="profile-stats-grid">
+        <div class="profile-stat-card">
+          <div class="psc-icon">&#9889;</div>
+          <div class="psc-val" id="profile-xp">150</div>
+          <div class="psc-label">XP</div>
+        </div>
+        <div class="profile-stat-card">
+          <div class="psc-icon">&#9733;</div>
+          <div class="psc-val">3</div>
+          <div class="psc-label">Уровень</div>
+        </div>
+        <div class="profile-stat-card">
+          <div class="psc-icon">&#x1F525;</div>
+          <div class="psc-val">5</div>
+          <div class="psc-label">Серия дней</div>
+        </div>
+        <div class="profile-stat-card">
+          <div class="psc-icon">&#x1F6E1;</div>
+          <div class="psc-val">2</div>
+          <div class="psc-label">Миссии</div>
+        </div>
+      </div>
+
+      <div class="profile-section">
+        <h3>&#x1F3C5; Стена достижений</h3>
+        <div class="achievement-grid">
+          <div class="achievement-item">
+            <div class="ach-icon">&#9889;</div>
+            <div class="ach-name">Первый шаг</div>
+          </div>
+          <div class="achievement-item">
+            <div class="ach-icon">&#x1F6E1;</div>
+            <div class="ach-name">Защитник</div>
+          </div>
+          <div class="achievement-item">
+            <div class="ach-icon">&#9733;</div>
+            <div class="ach-name">Отличник</div>
+          </div>
+          <div class="achievement-item">
+            <div class="ach-icon">&#x1F525;</div>
+            <div class="ach-name">Серия 5 дней</div>
+          </div>
+          <div class="achievement-item ach-locked">
+            <div class="ach-icon">?</div>
+            <div class="ach-name">Секретно</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-section">
+        <h3>&#x1F4CA; Прогресс миссий</h3>
+        <div class="mission-progress-list">
+          <div class="mission-progress-item">
+            <div class="mpi-icon" style="background:linear-gradient(135deg,var(--teal),var(--blue));">&#x1F575;</div>
+            <div class="mpi-info">
+              <h4>Мошенники в интернете</h4>
+              <div class="progress-bar" style="height:10px;">
+                <div class="progress-fill" style="width:60%"></div>
+              </div>
+            </div>
+            <div class="mpi-pct">60%</div>
+          </div>
+          <div class="mission-progress-item">
+            <div class="mpi-icon" style="background:linear-gradient(135deg,var(--orange),var(--yellow));">&#9878;</div>
+            <div class="mpi-info">
+              <h4>Мои права</h4>
+              <div class="progress-bar" style="height:10px;">
+                <div class="progress-fill" style="width:0%"></div>
+              </div>
+            </div>
+            <div class="mpi-pct">0%</div>
+          </div>
+          <div class="mission-progress-item" style="opacity:0.5;">
+            <div class="mpi-icon" style="background:#94a3b8;">&#x1F512;</div>
+            <div class="mpi-info">
+              <h4>Деньги и покупки</h4>
+              <div class="progress-bar" style="height:10px;">
+                <div class="progress-fill" style="width:0%"></div>
+              </div>
+            </div>
+            <div class="mpi-pct">&#x1F512;</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOADER OVERLAY -->
+<div class="loader-overlay" id="loader">
+  <div class="loader-shield">&#x1F6E1;</div>
+  <div class="loader-text">Проверяем ответ...</div>
+</div>
+
+<script>
+// ===== STATE =====
+let gameState = {
+  xp: 120,
+  hearts: 5,
+  selectedOption: null,
+  answered: false
+};
+
+// ===== NAVIGATION =====
+function goTo(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const target = document.getElementById(screenId);
+  if (target) {
+    target.classList.add('active');
+    window.scrollTo(0, 0);
+  }
+  // Trigger confetti on completion screen
+  if (screenId === 'screen-lesson-5') {
+    setTimeout(spawnConfetti, 300);
+  }
+  // Update hearts display
+  updateHeartsDisplay();
+}
+
+// ===== ROLE SELECTION =====
+function selectRole(el) {
+  document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+// ===== LESSON FLOW =====
+function startLesson() {
+  gameState.hearts = 5;
+  gameState.selectedOption = null;
+  gameState.answered = false;
+  // Reset option cards
+  document.querySelectorAll('#screen-lesson-2 .option-card').forEach(c => {
+    c.classList.remove('selected', 'correct', 'incorrect');
+    c.style.pointerEvents = '';
+  });
+  closeFeedback('feedback-2');
+  closeFeedback('feedback-4');
+  goTo('screen-lesson-1');
+}
+
+function exitLesson() {
+  goTo('screen-map');
+}
+
+// ===== SINGLE CHOICE =====
+function selectOption(el) {
+  if (gameState.answered) return;
+  document.querySelectorAll('#screen-lesson-2 .option-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  gameState.selectedOption = el;
+}
+
+function checkAnswer() {
+  if (!gameState.selectedOption || gameState.answered) return;
+  gameState.answered = true;
+
+  const isCorrect = gameState.selectedOption.getAttribute('data-correct') === 'true';
+  const fb = document.getElementById('feedback-2');
+  const burst = document.getElementById('fb2-burst');
+  const text = document.getElementById('fb2-text');
+  const xpEl = document.getElementById('fb2-xp');
+
+  // Mark all options
+  document.querySelectorAll('#screen-lesson-2 .option-card').forEach(c => {
+    c.style.pointerEvents = 'none';
+    if (c.getAttribute('data-correct') === 'true') {
+      c.classList.add('correct');
+    } else if (c === gameState.selectedOption && !isCorrect) {
+      c.classList.add('incorrect');
+    }
+  });
+
+  if (isCorrect) {
+    fb.className = 'feedback-panel correct-fb show';
+    burst.textContent = 'ВЕРНО! \uD83D\uDCAA';
+    text.textContent = 'Правильно! Показать родителям \u2014 самое верное решение. Они помогут разобраться.';
+    xpEl.textContent = '+10 XP';
+    gameState.xp += 10;
+    gameState.selectedOption.classList.add('anim-bounce');
+  } else {
+    fb.className = 'feedback-panel incorrect-fb show';
+    burst.textContent = 'ПРОМАХ! \uD83D\uDCA5';
+    text.textContent = 'Ни в коем случае нельзя переходить по незнакомым ссылкам или отвечать мошенникам!';
+    xpEl.textContent = '-1 \u2764';
+    gameState.hearts = Math.max(0, gameState.hearts - 1);
+    gameState.selectedOption.classList.add('anim-shake');
+  }
+  updateHeartsDisplay();
+}
+
+function closeFeedback(id) {
+  const fb = document.getElementById(id);
+  if (fb) fb.classList.remove('show');
+}
+
+// ===== FREE TEXT =====
+function submitFreeText() {
+  const input = document.getElementById('free-text-input');
+  if (!input.value.trim()) {
+    input.style.borderColor = 'var(--red)';
+    input.classList.add('anim-shake');
+    setTimeout(() => { input.classList.remove('anim-shake'); input.style.borderColor = ''; }, 500);
+    return;
+  }
+
+  // Show loader
+  const loader = document.getElementById('loader');
+  loader.classList.add('show');
+
+  setTimeout(() => {
+    loader.classList.remove('show');
+    gameState.xp += 5;
+    updateHeartsDisplay();
+    const fb = document.getElementById('feedback-4');
+    fb.classList.add('show');
+  }, 1500);
+}
+
+// ===== UPDATE DISPLAY =====
+function updateHeartsDisplay() {
+  document.querySelectorAll('.lesson-hearts').forEach(el => {
+    el.textContent = gameState.hearts;
+  });
+  const hudXp = document.getElementById('hud-xp-val');
+  if (hudXp) hudXp.textContent = gameState.xp;
+  const hudHearts = document.getElementById('hud-hearts-val');
+  if (hudHearts) hudHearts.textContent = gameState.hearts;
+  const profileXp = document.getElementById('profile-xp');
+  if (profileXp) profileXp.textContent = gameState.xp;
+}
+
+// ===== CONFETTI =====
+function spawnConfetti() {
+  const container = document.getElementById('confetti-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const colors = ['#F97316', '#0D9488', '#3B82F6', '#EC4899', '#EAB308', '#84CC16', '#EF4444'];
+  for (let i = 0; i < 60; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.style.left = Math.random() * 100 + 'vw';
+    piece.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+    piece.style.width = (6 + Math.random() * 10) + 'px';
+    piece.style.height = (6 + Math.random() * 10) + 'px';
+    piece.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+    piece.style.animationDuration = (2 + Math.random() * 3) + 's';
+    piece.style.animationDelay = (Math.random() * 1.5) + 's';
+    container.appendChild(piece);
+  }
+  // Clean up after animation
+  setTimeout(() => { container.innerHTML = ''; }, 6000);
+}
+</script>
+
+</body>
+</html>
