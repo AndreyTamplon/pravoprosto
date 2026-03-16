@@ -40,7 +40,7 @@ login_as() {
 
   # Step 1: Start SSO flow — follow redirect to get state cookie
   local start_resp
-  start_resp=$(curl -sSL -c "$jar" -D - -o /dev/null \
+  start_resp=$(curl -sS -c "$jar" -D - -o /dev/null \
     "$BASE/api/v1/auth/sso/yandex/start" 2>&1)
 
   # Extract redirect location (the mock SSO authorize URL)
@@ -54,8 +54,8 @@ login_as() {
 
   # Step 2: Extract state and redirect_uri from authorize URL, build callback
   local state redirect_uri callback_url
-  state=$(echo "$authorize_url" | grep -oP 'state=\K[^&]+' || echo "$authorize_url" | sed -n 's/.*state=\([^&]*\).*/\1/p')
-  redirect_uri=$(echo "$authorize_url" | grep -oP 'redirect_uri=\K[^&]+' || echo "$authorize_url" | sed -n 's/.*redirect_uri=\([^&]*\).*/\1/p')
+  state=$(echo "$authorize_url" | sed -n 's/.*[?&]state=\([^&]*\).*/\1/p')
+  redirect_uri=$(echo "$authorize_url" | sed -n 's/.*[?&]redirect_uri=\([^&]*\).*/\1/p')
 
   # URL-decode redirect_uri
   redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$redirect_uri'))" 2>/dev/null || echo "$redirect_uri")
@@ -487,13 +487,24 @@ info "  Offer activated"
 # ---------------------------------------------------------------------------
 
 info "Setting up guardianship..."
-INVITE_RESP=$(api_post "parent" "$PARENT_CSRF" "/api/v1/parent/guardian-invites" '{}')
-INVITE_TOKEN=$(json_field "$INVITE_RESP" "token")
+INVITE_RESP=$(api_post "parent" "$PARENT_CSRF" "/api/v1/parent/children/link-invites" '{}')
+# Extract token from claim_url (format: .../claim/guardian-link#token=<raw_token>)
+INVITE_TOKEN=$(echo "$INVITE_RESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+url = d.get('claim_url', '')
+if '#token=' in url:
+    print(url.split('#token=')[1])
+elif 'token=' in url:
+    print(url.split('token=')[-1].split('&')[0])
+else:
+    print(d.get('token', ''))
+" 2>/dev/null)
 info "  Guardian invite token: $INVITE_TOKEN"
 
 # Student claims invite
 if [ -n "$INVITE_TOKEN" ]; then
-  CLAIM_RESP=$(api_post "student" "$STUDENT_CSRF" "/api/v1/student/guardian-invites/$INVITE_TOKEN/claim" '{}')
+  CLAIM_RESP=$(api_post "student" "$STUDENT_CSRF" "/api/v1/student/guardian-links/claim" "{\"token\":\"$INVITE_TOKEN\"}")
   info "  Student claimed guardian invite"
 fi
 
