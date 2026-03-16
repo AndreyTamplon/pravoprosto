@@ -1,0 +1,310 @@
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 20px 60px;
+  animation: screenIn 0.4s ease-out;
+}
+
+.backBtn {
+  margin-bottom: 16px;
+}
+
+/* Header */
+.headerPanel {
+  margin-bottom: 24px;
+}
+
+.headerTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.titleInput {
+  font-size: 1.4rem;
+  font-weight: 800;
+  border: none;
+  background: transparent;
+  flex: 1;
+  min-width: 200px;
+  padding: 4px 0;
+  outline: none;
+  color: var(--dark);
+  font-family: var(--font-family);
+  border-bottom: 2px dashed var(--gray-300);
+  transition: border-color var(--transition);
+}
+
+.titleInput:focus {
+  border-bottom-color: var(--teal);
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.saved {
+  font-size: 0.85rem;
+  color: var(--teal);
+  font-weight: 700;
+}
+
+/* Node list */
+.nodeList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+
+/* Arrow connector between nodes */
+.connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  color: var(--dark);
+}
+
+.connectorLine {
+  width: 3px;
+  height: 20px;
+  background: var(--dark);
+}
+
+.connectorArrow {
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 10px solid var(--dark);
+}
+
+/* Node card */
+.nodeCard {
+  position: relative;
+  border-left: 5px solid var(--teal);
+}
+
+.nodeCard.story {
+  border-left-color: var(--blue);
+}
+
+.nodeCard.single_choice {
+  border-left-color: var(--orange);
+}
+
+.nodeCard.free_text {
+  border-left-color: var(--pink);
+}
+
+.nodeCard.terminal {
+  border-left-color: var(--lime);
+}
+
+.nodeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 8px;
+}
+
+.nodeTypeLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nodeActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.moveBtn {
+  padding: 2px 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: var(--border-thin);
+  border-radius: 4px;
+  background: var(--white);
+  transition: background var(--transition);
+}
+
+.moveBtn:hover {
+  background: var(--gray-100);
+}
+
+.moveBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.deleteNodeBtn {
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: var(--red);
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background var(--transition);
+}
+
+.deleteNodeBtn:hover {
+  background: #FEE2E2;
+}
+
+/* Story node */
+.storyContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.illustrationPlaceholder {
+  width: 100%;
+  height: 120px;
+  border: 2px dashed var(--gray-300);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-400);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.illustrationPlaceholder:hover {
+  border-color: var(--blue);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* Choice node */
+.choiceContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.optionsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.correctToggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: var(--border-thin);
+  background: var(--white);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  transition: background var(--transition), border-color var(--transition);
+  flex-shrink: 0;
+}
+
+.correctToggle.active {
+  background: var(--lime);
+  border-color: var(--lime-dark, #65a30d);
+  color: var(--white);
+}
+
+.optionInput {
+  flex: 1;
+  padding: 8px 12px;
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.optionInput:focus {
+  border-color: var(--orange);
+}
+
+.removeOptionBtn {
+  cursor: pointer;
+  color: var(--red);
+  font-size: 1rem;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background var(--transition);
+}
+
+.removeOptionBtn:hover {
+  background: #FEE2E2;
+}
+
+/* Free text node */
+.freeTextContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Terminal node */
+.terminalContent {
+  text-align: center;
+  padding: 16px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--lime-dark, #65a30d);
+}
+
+/* Edge display */
+.edgeInfo {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--gray-300);
+  font-size: 0.8rem;
+  color: var(--dark-light);
+}
+
+/* Add node buttons */
+.addNodeBar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 2px dashed var(--gray-300);
+}
+
+/* Error */
+.error {
+  padding: 12px 16px;
+  background: #FEE2E2;
+  border: 2px solid var(--red);
+  border-radius: var(--radius-sm);
+  color: var(--red-dark);
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
+
+.feedbackLabel {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--dark-mid);
+  margin-top: 4px;
+}

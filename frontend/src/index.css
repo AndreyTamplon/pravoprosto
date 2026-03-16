@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --teal: #0D9488;
+  --teal-dark: #0A7A70;
+  --teal-light: #14b8a6;
+  --blue: #3B82F6;
+  --blue-dark: #2563EB;
+  --orange: #F97316;
+  --orange-dark: #E56308;
+  --pink: #EC4899;
+  --pink-light: #F472B6;
+  --bg: #FFFBEB;
+  --dark: #1E293B;
+  --dark-mid: #334155;
+  --dark-light: #475569;
+  --white: #FFFFFF;
+  --lime: #84CC16;
+  --lime-dark: #65a30d;
+  --red: #EF4444;
+  --red-dark: #DC2626;
+  --yellow: #EAB308;
+  --yellow-light: #FDE047;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+
+  --border: 3px solid #1E293B;
+  --border-thick: 4px solid #1E293B;
+  --border-thin: 2px solid #1E293B;
+  --shadow-comic: 5px 5px 0 #1E293B;
+  --shadow-comic-sm: 3px 3px 0 #1E293B;
+  --shadow-comic-lg: 7px 7px 0 #1E293B;
+  --shadow-comic-xs: 2px 2px 0 #1E293B;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  --font-family: 'Baloo 2', cursive, sans-serif;
+  --transition: 0.2s ease;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font-family);
+  background: var(--bg);
+  color: var(--dark);
+  overflow-x: hidden;
+  min-height: 100vh;
+  line-height: 1.5;
+  font-size: 16px;
+  font-weight: 500;
+  -webkit-font-smoothing: antialiased;
+}
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; height: auto; }
+button { font-family: var(--font-family); cursor: pointer; border: none; background: none; }
+input, textarea, select { font-family: var(--font-family); font-size: 1rem; }
+
+.halftone {
+  background-image: radial-gradient(circle, #1E293B 1px, transparent 1px);
+  background-size: 12px 12px;
+  opacity: 0.06;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes screenIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes glowPulse { 0%, 100% { box-shadow: 0 0 8px rgba(59,130,246,0.4); } 50% { box-shadow: 0 0 20px rgba(59,130,246,0.7); } }
+@keyframes shake { 0%,100%{transform:translateX(0)} 10%,30%,50%,70%,90%{transform:translateX(-4px)} 20%,40%,60%,80%{transform:translateX(4px)} }
+@keyframes bounceIn { 0%{opacity:0;transform:scale(0.3)} 50%{opacity:1;transform:scale(1.08)} 70%{transform:scale(0.95)} 100%{transform:scale(1)} }
+@keyframes floatUp { from{opacity:0;transform:translateY(30px)} to{opacity:1;transform:translateY(0)} }
+@keyframes slideUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+@keyframes stripesMove { 0%{background-position:0 0} 100%{background-position:22.6px 0} }
+@keyframes spinShield { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes confettiFall { 0%{transform:translateY(-10px) rotate(0deg);opacity:1} 100%{transform:translateY(100vh) rotate(720deg);opacity:0} }
+
+.screen-enter { animation: screenIn 0.4s ease-out; }
+.shake { animation: shake 0.5s ease; }
+.bounce-in { animation: bounceIn 0.6s ease; }
+.float-up { animation: floatUp 0.5s ease forwards; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }

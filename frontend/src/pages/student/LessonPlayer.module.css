@@ -1,0 +1,359 @@
+/* ===== Layout ===== */
+.playerLayout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px 120px;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* ===== Story Screen ===== */
+.storyScreen {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: floatUp 0.4s ease;
+}
+
+.storyIllustration {
+  text-align: center;
+  font-size: 4rem;
+  padding: 16px 0;
+}
+
+.storyText {
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.storySpeaker {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.storyActions {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+/* ===== Question Screen ===== */
+.questionScreen {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: floatUp 0.4s ease;
+}
+
+.questionText {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.questionIllustration {
+  text-align: center;
+  font-size: 3rem;
+  margin-bottom: 4px;
+}
+
+/* ===== Options ===== */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.option {
+  padding: 16px 20px;
+  background: var(--white);
+  border: 3px solid var(--dark);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition), background var(--transition);
+  box-shadow: var(--shadow-comic-sm);
+  line-height: 1.4;
+}
+
+.option:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-comic);
+}
+
+.optionSelected {
+  border-color: var(--blue);
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2), var(--shadow-comic-sm);
+}
+
+.optionDisabled {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* ===== Free Text ===== */
+.freeTextArea {
+  width: 100%;
+  min-height: 120px;
+  padding: 16px;
+  font-family: var(--font-family);
+  font-size: 1rem;
+  border: 3px solid var(--dark);
+  border-radius: var(--radius);
+  background: var(--white);
+  box-shadow: var(--shadow-comic-xs);
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--transition);
+  line-height: 1.5;
+}
+
+.freeTextArea:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.2), var(--shadow-comic-xs);
+}
+
+.submitRow {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+/* ===== Feedback Panel ===== */
+.feedbackOverlay {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  animation: slideUp 0.35s ease;
+}
+
+.feedbackPanel {
+  padding: 28px 24px;
+  border-top: 4px solid var(--dark);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.feedbackCorrect {
+  background: #dcfce7;
+  border-top-color: var(--lime-dark);
+}
+
+.feedbackIncorrect {
+  background: #fee2e2;
+  border-top-color: var(--red-dark);
+}
+
+.feedbackPartial {
+  background: #fef9c3;
+  border-top-color: var(--orange);
+}
+
+.feedbackBurst {
+  margin-bottom: 4px;
+}
+
+.feedbackText {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: 480px;
+  color: var(--dark-mid);
+}
+
+.feedbackXp {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.feedbackHearts {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--red);
+}
+
+.feedbackAction {
+  margin-top: 4px;
+}
+
+/* ===== Lesson Complete ===== */
+.completeScreen {
+  width: 100%;
+  text-align: center;
+  animation: bounceIn 0.6s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.confettiWrap {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.confetti {
+  position: absolute;
+  top: -20px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  animation: confettiFall 3s ease-in forwards;
+}
+
+.completeMascot {
+  font-size: 5rem;
+}
+
+.completeTitle {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.completeStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.completeStat {
+  background: var(--white);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 8px;
+  box-shadow: var(--shadow-comic-xs);
+}
+
+.completeStatValue {
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+.completeStatLabel {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.completeActions {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+/* ===== Loading / LLM check ===== */
+.loadingScreen {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.loadingShield {
+  font-size: 3rem;
+  animation: spinShield 1.5s linear infinite;
+}
+
+.loadingText {
+  font-weight: 600;
+  color: var(--dark-light);
+}
+
+/* ===== Hearts Empty ===== */
+.heartsEmptyScreen {
+  text-align: center;
+  animation: floatUp 0.5s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.heartsEmptyMascot {
+  font-size: 4rem;
+}
+
+.heartsEmptyTitle {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--red);
+}
+
+.heartsEmptyDesc {
+  color: var(--dark-light);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.recoveryTimer {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--pink);
+}
+
+/* ===== Error state ===== */
+.errorScreen {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+@media (max-width: 600px) {
+  .body {
+    padding: 20px 16px 100px;
+    justify-content: flex-start;
+    padding-top: 24px;
+  }
+
+  .questionText {
+    font-size: 1rem;
+  }
+
+  .completeStats {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .completeActions {
+    flex-direction: column;
+    width: 100%;
+  }
+}

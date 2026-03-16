@@ -1,0 +1,67 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-family);
+  font-weight: 700;
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-comic-sm);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+  white-space: nowrap;
+  transform: rotate(-0.5deg);
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-comic-lg);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: var(--shadow-comic-xs);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sm { padding: 6px 14px; font-size: 0.85rem; }
+.md { padding: 10px 20px; font-size: 0.95rem; }
+.lg { padding: 14px 28px; font-size: 1.1rem; }
+
+.primary { background: var(--orange); color: var(--white); }
+.primary:hover:not(:disabled) { background: var(--orange-dark); }
+.secondary { background: var(--white); color: var(--dark); }
+.danger { background: var(--red); color: var(--white); }
+.danger:hover:not(:disabled) { background: var(--red-dark); }
+.success { background: var(--lime); color: var(--dark); }
+.success:hover:not(:disabled) { background: var(--lime-dark); }
+.ghost { background: transparent; color: var(--dark); border: var(--border-thin); box-shadow: none; }
+.ghost:hover:not(:disabled) { background: var(--gray-100); box-shadow: none; transform: none; }
+.outline { background: var(--white); color: var(--dark); }
+.outline:hover:not(:disabled) { background: var(--gray-100); }
+.teal { background: var(--teal); color: var(--white); }
+.teal:hover:not(:disabled) { background: var(--teal-dark); }
+.dark { background: var(--dark); color: var(--white); }
+.dark:hover:not(:disabled) { background: var(--dark-mid); }
+
+.full { width: 100%; }
+
+.uppercase { text-transform: uppercase; letter-spacing: 0.5px; }
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -1,0 +1,40 @@
+.burst {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--yellow);
+  color: var(--dark);
+  font-weight: 800;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 14px 18px;
+  clip-path: polygon(
+    50% 0%,
+    63% 18%,
+    80% 5%,
+    78% 25%,
+    100% 30%,
+    85% 42%,
+    98% 58%,
+    78% 58%,
+    85% 78%,
+    65% 68%,
+    50% 88%,
+    35% 68%,
+    15% 78%,
+    22% 58%,
+    2% 58%,
+    15% 42%,
+    0% 30%,
+    22% 25%,
+    20% 5%,
+    37% 18%
+  );
+  min-width: 80px;
+  min-height: 80px;
+  transform: rotate(-6deg);
+  animation: bounceIn 0.6s ease;
+  text-align: center;
+  line-height: 1.2;
+}

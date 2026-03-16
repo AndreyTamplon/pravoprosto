@@ -1,0 +1,71 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  padding: 48px 36px;
+}
+
+.mascot {
+  font-size: 4rem;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.logo {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--teal);
+  margin-bottom: 8px;
+}
+
+.sub {
+  font-size: 0.95rem;
+  color: var(--dark-light);
+  margin-bottom: 32px;
+  line-height: 1.5;
+}
+
+.yandexBtn {
+  background: var(--orange);
+  color: var(--white);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 14px 28px;
+  border: var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-comic);
+  cursor: pointer;
+  width: 100%;
+  transition: transform var(--transition), box-shadow var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.yandexBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-comic-lg);
+  background: var(--orange-dark);
+}
+
+.yandexBtn:active {
+  transform: translateY(2px);
+  box-shadow: var(--shadow-comic-xs);
+}
+
+.hint {
+  margin-top: 24px;
+  font-size: 0.85rem;
+  color: var(--gray-500);
+  line-height: 1.5;
+}

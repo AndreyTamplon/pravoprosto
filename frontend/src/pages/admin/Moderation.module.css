@@ -1,0 +1,137 @@
+.page {
+  padding: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  animation: screenIn 0.4s ease-out;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--white);
+  border: var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-comic-sm);
+  overflow: hidden;
+}
+
+.table th {
+  background: var(--gray-100);
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  border-bottom: var(--border-thin);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 0.93rem;
+  vertical-align: middle;
+}
+
+.table tbody tr {
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.table tbody tr:hover {
+  background: var(--gray-100);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.courseTitle {
+  font-weight: 700;
+}
+
+.reviewDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.reviewInfo {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 20px;
+}
+
+.infoLabel {
+  font-weight: 700;
+  color: var(--gray-500);
+  font-size: 0.9rem;
+}
+
+.infoValue {
+  font-weight: 600;
+}
+
+.reviewActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rejectSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #FEE2E2;
+  border-radius: var(--radius-sm);
+  border: var(--border-thin);
+  border-color: var(--red);
+}
+
+.rejectLabel {
+  font-weight: 700;
+  color: var(--red-dark);
+}
+
+.rejectTextarea {
+  padding: 10px 14px;
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family);
+  font-size: 0.95rem;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.error {
+  background: #FEE2E2;
+  border: var(--border-thin);
+  border-color: var(--red);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  color: var(--red-dark);
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+@keyframes screenIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}

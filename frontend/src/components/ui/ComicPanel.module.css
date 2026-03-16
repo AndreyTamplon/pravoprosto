@@ -1,0 +1,43 @@
+.panel {
+  background: var(--white);
+  border: var(--border-thick);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-comic);
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.noPad { padding: 0; }
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-comic-lg);
+}
+
+.clickable:active {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-comic-sm);
+}
+
+.flat {
+  box-shadow: none;
+  border-width: 2px;
+}
+
+.panelSm {
+  padding: 14px;
+  border-width: 3px;
+  box-shadow: var(--shadow-comic-sm);
+}
+
+.accentTeal { border-left: 5px solid var(--teal); }
+.accentOrange { border-left: 5px solid var(--orange); }
+.accentBlue { border-left: 5px solid var(--blue); }
+.accentPink { border-left: 5px solid var(--pink); }
+.accentLime { border-left: 5px solid var(--lime); }

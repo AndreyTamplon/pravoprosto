@@ -1,0 +1,188 @@
+.page {
+  animation: screenIn 0.4s ease-out;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.backBtn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  box-shadow: var(--shadow-comic-xs);
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+
+.backBtn:hover {
+  transform: translateY(-2px);
+}
+
+.courseTitle {
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.courseSub {
+  font-size: 0.9rem;
+  color: var(--dark-light);
+  margin-top: 4px;
+}
+
+/* Module separator */
+.module {
+  margin-bottom: 8px;
+}
+
+.moduleTitle {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray-500);
+  padding: 20px 0 12px;
+  text-align: center;
+}
+
+/* Tree path */
+.tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.nodeWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+/* Connector line */
+.connector {
+  width: 3px;
+  height: 32px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--gray-300) 0,
+    var(--gray-300) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+.connectorDone {
+  background: var(--teal);
+}
+
+/* Node circle */
+.node {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 4px solid var(--dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  position: relative;
+  transition: transform var(--transition), box-shadow var(--transition);
+  cursor: default;
+  background: var(--white);
+  box-shadow: var(--shadow-comic-sm);
+}
+
+.nodeCompleted {
+  background: var(--teal);
+  color: var(--white);
+  border-color: var(--teal-dark);
+}
+
+.nodeActive {
+  background: var(--blue);
+  color: var(--white);
+  border-color: var(--blue-dark);
+  animation: glowPulse 2s ease infinite;
+  cursor: pointer;
+}
+
+.nodeActive:hover {
+  transform: scale(1.08);
+}
+
+.nodeLocked {
+  background: var(--gray-200);
+  color: var(--gray-400);
+  border-color: var(--gray-300);
+}
+
+.nodePaid {
+  background: var(--yellow-light);
+  color: var(--dark);
+  border-color: var(--orange);
+}
+
+.nodeAwaiting {
+  background: var(--white);
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+/* Node label */
+.nodeLabel {
+  margin-top: 8px;
+  margin-bottom: 4px;
+  text-align: center;
+  max-width: 200px;
+}
+
+.nodeName {
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.nodeAction {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* Mascot at current node */
+.mascotBubble {
+  position: absolute;
+  top: -42px;
+  font-size: 1.6rem;
+  animation: floatUp 0.6s ease;
+}
+
+/* Price badge */
+.priceBadge {
+  margin-top: 6px;
+}
+
+@media (max-width: 600px) {
+  .courseTitle {
+    font-size: 1.3rem;
+  }
+
+  .node {
+    width: 56px;
+    height: 56px;
+    font-size: 1.3rem;
+  }
+}

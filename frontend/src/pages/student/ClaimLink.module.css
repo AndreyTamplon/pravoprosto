@@ -1,0 +1,43 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  padding: 40px 32px;
+}
+
+.icon {
+  font-size: 3.5rem;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.desc {
+  font-size: 0.95rem;
+  color: var(--dark-light);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.success {
+  color: var(--teal);
+  font-weight: 600;
+}

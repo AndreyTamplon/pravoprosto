@@ -1,0 +1,48 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 460px;
+  padding: 40px 32px;
+}
+
+.icon {
+  font-size: 3.5rem;
+  text-align: center;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.sub {
+  font-size: 0.95rem;
+  color: var(--dark-light);
+  text-align: center;
+  margin-bottom: 32px;
+  line-height: 1.5;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.error {
+  font-size: 0.85rem;
+  color: var(--red);
+  text-align: center;
+  font-weight: 600;
+}

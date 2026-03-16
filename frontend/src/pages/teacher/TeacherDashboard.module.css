@@ -1,0 +1,77 @@
+.page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 32px 20px 60px;
+  animation: screenIn 0.4s ease-out;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--dark);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.courseCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.courseTitle {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+.courseMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.courseInfo {
+  font-size: 0.85rem;
+  color: var(--dark-light);
+}
+
+.courseFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--dark-light);
+}
+
+/* Modal */
+.modalForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.error {
+  padding: 12px 16px;
+  background: #FEE2E2;
+  border: 2px solid var(--red);
+  border-radius: var(--radius-sm);
+  color: var(--red-dark);
+  font-weight: 600;
+  font-size: 0.9rem;
+}

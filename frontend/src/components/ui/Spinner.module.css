@@ -1,0 +1,45 @@
+.spinner {
+  display: inline-block;
+  border: 4px solid var(--gray-200);
+  border-top-color: var(--teal);
+  border-radius: 50%;
+  animation: spinShield 0.8s linear infinite;
+}
+
+@keyframes spinShield {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.sm {
+  width: 20px;
+  height: 20px;
+  border-width: 3px;
+}
+
+.md {
+  width: 36px;
+  height: 36px;
+  border-width: 4px;
+}
+
+.lg {
+  width: 52px;
+  height: 52px;
+  border-width: 5px;
+}
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+}
+
+.text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gray-500);
+}
