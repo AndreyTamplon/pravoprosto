@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"pravoprost/backend/internal/identity"
 )
@@ -103,6 +106,66 @@ func secureEquals(left string, right string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// rateLimitByIP returns middleware that limits requests per IP using an in-memory
+// token bucket. tokens are replenished at a rate of limit per window.
+func rateLimitByIP(limit int, window time.Duration) func(http.Handler) http.Handler {
+	type bucket struct {
+		tokens int
+		last   time.Time
+	}
+	var mu sync.Mutex
+	buckets := make(map[string]*bucket)
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := r.RemoteAddr
+			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+				ip = strings.TrimSpace(strings.Split(fwd, ",")[0])
+			}
+
+			mu.Lock()
+			b, ok := buckets[ip]
+			now := time.Now()
+			if !ok {
+				b = &bucket{tokens: limit, last: now}
+				buckets[ip] = b
+			}
+			elapsed := now.Sub(b.last)
+			if elapsed >= window {
+				b.tokens = limit
+				b.last = now
+			} else {
+				refill := int(elapsed * time.Duration(limit) / window)
+				b.tokens += refill
+				if b.tokens > limit {
+					b.tokens = limit
+				}
+				b.last = now
+			}
+			if b.tokens <= 0 {
+				mu.Unlock()
+				writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests", nil)
+				return
+			}
+			b.tokens--
+			mu.Unlock()
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func limitRequestBody(maxBytes int64) func(http.Handler) http.Handler {

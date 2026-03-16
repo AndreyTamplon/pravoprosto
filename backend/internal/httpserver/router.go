@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -37,6 +38,7 @@ type Dependencies struct {
 func NewRouter(deps Dependencies) http.Handler {
 	router := chi.NewRouter()
 	router.Use(limitRequestBody(deps.Config.MaxRequestBodyBytes))
+	router.Use(securityHeaders)
 
 	if deps.Identity == nil {
 		registry := identity.NewProviderRegistry()
@@ -119,7 +121,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 		}, deps))
 
-		r.Get("/auth/sso/{provider}/start", func(w http.ResponseWriter, r *http.Request) {
+		r.With(rateLimitByIP(10, time.Minute)).Get("/auth/sso/{provider}/start", func(w http.ResponseWriter, r *http.Request) {
 			result, err := deps.Identity.StartSSO(chi.URLParam(r, "provider"), r.URL.Query().Get("return_to"))
 			if err != nil {
 				switch err {

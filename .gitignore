@@ -1,2 +1,5 @@
 materials
 .idea
+.env
+.env.local
+.env.production

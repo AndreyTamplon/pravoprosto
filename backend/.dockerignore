@@ -1,0 +1,6 @@
+.git
+*.md
+mockserver
+server
+tests
+*_test.go

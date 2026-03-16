@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pravoprost
+      POSTGRES_USER: pravoprost
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pravoprost -d pravoprost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # sslmode=disable is safe here: postgres is on internal Docker network, not exposed externally
+      PRAVO_DATABASE_URL: postgres://pravoprost:${POSTGRES_PASSWORD}@postgres:5432/pravoprost?sslmode=disable
+      PRAVO_HTTP_ADDR: ":8080"
+      PRAVO_BASE_URL: ${BASE_URL}
+      PRAVO_SIGNING_SECRET: ${SIGNING_SECRET}
+      PRAVO_COOKIE_SECURE: "true"
+      PRAVO_LLM_BASE_URL: ${LLM_BASE_URL}
+      PRAVO_LLM_API_KEY: ${LLM_API_KEY}
+      PRAVO_LLM_MODEL: ${LLM_MODEL}
+      PRAVO_YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID}
+      PRAVO_YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET}
+      PRAVO_YANDEX_AUTH_URL: https://oauth.yandex.ru/authorize
+      PRAVO_YANDEX_TOKEN_URL: https://oauth.yandex.ru/token
+      PRAVO_YANDEX_USERINFO_URL: https://login.yandex.ru/info
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+
+volumes:
+  pgdata:
