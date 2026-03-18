@@ -184,7 +184,7 @@ export default function LessonPlayer() {
   const handleSubmitAnswer = async () => {
     if (!currentStep) return;
     const step = screen.kind === 'single_choice' || screen.kind === 'free_text' ? screen : null;
-    if (!step || step.kind === 'loading') return;
+    if (!step) return;
 
     let answer: unknown;
     if (step.kind === 'single_choice') {

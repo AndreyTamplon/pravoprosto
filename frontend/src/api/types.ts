@@ -253,6 +253,7 @@ export interface CourseDraft {
   workflow_status: string;
   content_json: CourseContent;
   last_review_comment?: string;
+  has_published_revision?: boolean;
 }
 
 export interface CourseContent {

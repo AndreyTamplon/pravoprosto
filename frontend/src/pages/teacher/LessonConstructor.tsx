@@ -282,7 +282,9 @@ export default function LessonConstructor() {
         };
       });
 
+      const dv = draft?.draft_version ?? 1;
       await updateTeacherDraft(courseId!, {
+        draft_version: dv,
         content_json: { modules: updatedModules },
       });
       setSaved(true);

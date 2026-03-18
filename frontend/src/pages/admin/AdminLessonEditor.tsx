@@ -74,7 +74,8 @@ export default function AdminLessonEditor() {
           }),
         };
       });
-      await updateAdminDraft(courseId, { content_json: { modules: updatedModules } });
+      const dv = draft?.draft_version ?? 1;
+      await updateAdminDraft(courseId, { draft_version: dv, content_json: { modules: updatedModules } });
       setSaveMsg('Сохранено!');
       setTimeout(() => setSaveMsg(''), 2000);
     } catch (err) {
