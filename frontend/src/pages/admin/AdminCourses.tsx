@@ -39,7 +39,7 @@ export default function AdminCourses() {
       setShowCreate(false);
       setCreateTitle('');
       setCreateDesc('');
-      navigate(`/admin/courses/${res.course_id}/edit`);
+      navigate(`/admin/courses/${res.course_id}`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Ошибка создания');
     } finally {
@@ -98,7 +98,7 @@ export default function AdminCourses() {
           </thead>
           <tbody>
             {filtered.map(c => (
-              <tr key={c.course_id} onClick={() => navigate(`/admin/courses/${c.course_id}/edit`)}>
+              <tr key={c.course_id} onClick={() => navigate(`/admin/courses/${c.course_id}`)}>
                 <td className={styles.courseTitle}>{c.title}</td>
                 <td>{ownerBadge(c.owner_kind)}</td>
                 <td>{statusBadge(c)}</td>

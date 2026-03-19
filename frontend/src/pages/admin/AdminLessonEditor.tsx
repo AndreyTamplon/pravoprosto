@@ -190,7 +190,7 @@ export default function AdminLessonEditor() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <button className={styles.backBtn} onClick={() => navigate(`/admin/courses/${courseId}/edit`)}>&#8592;</button>
+          <button className={styles.backBtn} onClick={() => navigate(`/admin/courses/${courseId}`)}>&#8592;</button>
           <h1 className={styles.title}>{lessonTitle || 'Урок'}</h1>
         </div>
         <div className={styles.headerActions}>
