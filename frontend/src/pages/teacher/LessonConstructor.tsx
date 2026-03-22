@@ -129,7 +129,7 @@ export default function LessonConstructor() {
       if (lesson) {
         setLessonTitle(lesson.title);
         // Detect backend format (nodes have 'kind' not 'type') and convert
-        const rawGraph = lesson.graph as Record<string, unknown>;
+        const rawGraph = lesson.graph as unknown as Record<string, unknown>;
         if (isBackendLessonGraph(rawGraph)) {
           const converted = graphFromBackendFormat(rawGraph);
           if (isPlaceholderGraph(converted)) {

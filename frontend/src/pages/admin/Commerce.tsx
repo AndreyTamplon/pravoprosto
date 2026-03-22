@@ -434,7 +434,6 @@ function OrdersTab() {
       await createManualOrder({
         student_id: manualStudentId.trim(),
         offer_id: manualOfferId,
-        source: 'manual',
       });
       setShowManualCreate(false);
       setManualStudentId('');
