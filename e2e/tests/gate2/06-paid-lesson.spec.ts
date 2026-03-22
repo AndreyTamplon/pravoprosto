@@ -1,21 +1,50 @@
 import { test, expect } from '@playwright/test';
 import { fixtures } from '../../helpers/fixtures';
 
+const OFFER_TITLE = 'Урок: Персональные данные';
+const STUDENT_NAME = 'Борис';
+
+async function pollForValue<T>(
+  load: () => Promise<T>,
+  isReady: (value: T) => boolean,
+  timeout = 10000,
+): Promise<T> {
+  const startedAt = Date.now();
+  let lastValue = await load();
+  while (!isReady(lastValue)) {
+    if (Date.now() - startedAt >= timeout) {
+      return lastValue;
+    }
+    await new Promise(resolve => setTimeout(resolve, 400));
+    lastValue = await load();
+  }
+  return lastValue;
+}
+
 test.describe('Gate 2 -- Paid lesson flow', () => {
   test('student requests purchase, admin confirms, lesson unlocks', async ({
     browser,
   }) => {
-    const { platformCourseId } = fixtures;
+    const { platformCourseId, offerId } = fixtures;
 
     // -----------------------------------------------------------------------
     // Phase 1: Student sees locked lesson and submits purchase request
     // -----------------------------------------------------------------------
     const studentContext = await browser.newContext({
-      storageState: '.auth/student.json',
+      storageState: '.auth/student2.json',
     });
     const studentPage = await studentContext.newPage();
 
     await studentPage.goto(`/student/courses/${platformCourseId}`);
+    const studentAccountId = await studentPage.evaluate(async () => {
+      const response = await fetch('/api/v1/session', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) return '';
+      const body = await response.json().catch(() => null);
+      return (body?.user?.account_id as string | undefined) ?? '';
+    });
     await expect(
       studentPage.getByText('Безопасность в интернете'),
     ).toBeVisible();
@@ -25,31 +54,32 @@ test.describe('Gate 2 -- Paid lesson flow', () => {
       studentPage.getByText('Что нельзя рассказывать в интернете'),
     ).toBeVisible();
 
-    // Should show a price badge (490 RUB)
-    await expect(studentPage.getByText(/490/)).toBeVisible();
-
-    // Click "Оставить заявку" button
+    const priceBadge = studentPage.getByText(/490/);
+    const awaitingConfirmationBadge = studentPage.getByText('Ожидает подтверждения');
     const purchaseButton = studentPage.getByRole('button', {
       name: 'Оставить заявку',
     });
-    await expect(purchaseButton).toBeVisible();
-    await purchaseButton.click();
-
-    // Wait for the request to be processed
-    await studentPage.waitForTimeout(2000);
-
-    // Button should change to "Заявка отправлена" (disabled state) after reload
-    // Or if the API failed, an error message might be shown
     const sentButton = studentPage.getByRole('button', { name: 'Заявка отправлена' });
-    const hasSent = await sentButton.isVisible({ timeout: 5000 }).catch(() => false);
-    if (!hasSent) {
-      // The purchase request might have failed - reload and check again
-      await studentPage.goto(`/student/courses/${platformCourseId}`);
-      await expect(
-        studentPage.getByText('Что нельзя рассказывать в интернете'),
-      ).toBeVisible();
-    }
-    await expect(sentButton.or(purchaseButton)).toBeVisible();
+
+    await expect(priceBadge).toBeVisible();
+    await expect(purchaseButton).toBeVisible();
+    await expect(awaitingConfirmationBadge).not.toBeVisible();
+    await expect(sentButton).not.toBeVisible();
+
+    const purchaseResponse = studentPage.waitForResponse((response) =>
+      response.request().method() === 'POST' && response.url().includes(`/student/offers/${offerId}/purchase-requests`),
+    );
+    await purchaseButton.click();
+    expect((await purchaseResponse).ok()).toBeTruthy();
+
+    await studentPage.goto(`/student/courses/${platformCourseId}`);
+    await expect(
+      studentPage.getByText('Что нельзя рассказывать в интернете'),
+    ).toBeVisible();
+    await expect(sentButton).toBeVisible();
+    await expect(sentButton).toBeDisabled();
+    await expect(purchaseButton).not.toBeVisible();
+    await expect(awaitingConfirmationBadge).not.toBeVisible();
 
     // -----------------------------------------------------------------------
     // Phase 2: Admin processes the purchase request
@@ -64,67 +94,105 @@ test.describe('Gate 2 -- Paid lesson flow', () => {
 
     // Switch to "Заявки" tab
     await adminPage.getByRole('button', { name: 'Заявки' }).click();
+    const fetchMatchingRequestId = async () => adminPage.evaluate(async ({ currentStudentId, currentOfferId }) => {
+      const response = await fetch('/api/v1/admin/commerce/purchase-requests', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) return '';
+      const body = await response.json().catch(() => null);
+      const items = Array.isArray(body?.items) ? body.items : [];
+      const match = items.find((item: Record<string, unknown>) => {
+        const student = (item.student ?? {}) as Record<string, unknown>;
+        const offer = (item.offer ?? {}) as Record<string, unknown>;
+        return (student.account_id ?? item.student_id) === currentStudentId
+          && (offer.offer_id ?? item.offer_id) === currentOfferId
+          && item.status === 'open';
+      });
+      return (match?.purchase_request_id as string | undefined) ?? '';
+    }, { currentStudentId: studentAccountId, currentOfferId: offerId });
+    const requestId = await pollForValue(fetchMatchingRequestId, value => value !== '', 15000);
+    expect(requestId).not.toBe('');
 
-    // Verify the student's purchase request is visible
-    // The request row should have "Открыта" status badge and action buttons
-    await expect(adminPage.getByText('Открыта').first()).toBeVisible({ timeout: 10000 });
+    const requestRow = adminPage.locator('tbody tr')
+      .filter({ has: adminPage.getByText(STUDENT_NAME, { exact: true }) })
+      .filter({ has: adminPage.getByText(OFFER_TITLE) })
+      .first();
+    await expect(requestRow).toBeVisible({ timeout: 10000 });
 
-    // Click "Создать заказ" for this request
-    await adminPage
-      .getByRole('button', { name: 'Создать заказ' })
-      .first()
-      .click();
+    const createOrderButton = requestRow.getByRole('button', { name: 'Создать заказ' });
+    await expect(createOrderButton).toBeVisible();
 
-    // Modal opens -- confirm order creation
+    const createOrderResponse = adminPage.waitForResponse((response) =>
+      response.request().method() === 'POST' && response.url().includes('/commerce/orders/manual'),
+    );
+    await createOrderButton.click();
     await expect(adminPage.getByText('Создать заказ из заявки')).toBeVisible();
     await adminPage.getByRole('button', { name: 'Подтвердить' }).click();
+    const createOrderResult = await createOrderResponse;
+    expect(createOrderResult.ok()).toBeTruthy();
+    const createOrderBody = await createOrderResult.json().catch(() => null);
+    const createdOrderId = (createOrderBody?.order_id as string | undefined) ?? '';
+    expect(createdOrderId).not.toBe('');
 
-    // Wait for the API call to complete
-    await adminPage.waitForTimeout(3000);
+    const fetchMatchingOrder = async () => adminPage.evaluate(async ({ currentOrderId }) => {
+      const response = await fetch('/api/v1/admin/commerce/orders', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) return null;
+      const body = await response.json().catch(() => null);
+      const items = Array.isArray(body?.items) ? body.items : [];
+      const match = items.find((item: Record<string, unknown>) => item.order_id === currentOrderId);
+      return match ?? null;
+    }, { currentOrderId: createdOrderId });
+    const createdOrder = await pollForValue(fetchMatchingOrder, value => value !== null, 15000);
+    expect(createdOrder).not.toBeNull();
 
-    // Close the modal if still open (the order creation may have failed)
-    const modalStillOpen = await adminPage.getByText('Создать заказ из заявки').isVisible().catch(() => false);
-    if (modalStillOpen) {
-      await adminPage.keyboard.press('Escape');
-      await adminPage.waitForTimeout(500);
-    }
+    const openOrdersTab = async () => {
+      const ordersResponse = adminPage.waitForResponse((response) =>
+        response.request().method() === 'GET' && response.url().includes('/admin/commerce/orders'),
+      );
+      await adminPage.getByRole('button', { name: 'Заказы' }).click();
+      expect((await ordersResponse).ok()).toBeTruthy();
+    };
 
-    // Switch to "Заказы" tab
-    await adminPage.getByRole('button', { name: 'Заказы' }).click();
+    // Switch to "Заказы" tab and find the created order
+    await adminPage.reload();
+    await openOrdersTab();
 
-    // Check if an order was created
-    const hasOrder = await adminPage.getByText('Ожидает оплаты').isVisible({ timeout: 5000 }).catch(() => false);
-    if (!hasOrder) {
-      // Order creation may have failed; verify the requests tab still has the request
-      await adminPage.getByRole('button', { name: 'Заявки' }).click();
-      await expect(adminPage.getByText('Открыта').first()).toBeVisible();
-      // Skip the rest of the payment flow
-      await studentContext.close();
-      await adminContext.close();
-      return;
-    }
+    const orderRow = adminPage.locator('tbody tr')
+      .filter({ has: adminPage.getByText(STUDENT_NAME, { exact: true }) })
+      .filter({ has: adminPage.getByText(OFFER_TITLE) })
+      .first();
+    await expect(orderRow).toBeVisible({ timeout: 10000 });
+    await expect(orderRow.getByText('Ожидает оплаты')).toBeVisible({ timeout: 10000 });
+    await orderRow.click();
+    await expect(adminPage.getByRole('button', { name: 'Подтвердить оплату' })).toBeVisible();
+    await adminPage.getByPlaceholder(/ID транзакции/i).fill('e2e-payment-001');
 
-    // Click on the order row to open the detail modal
-    await adminPage.locator('tbody tr').first().click();
+    const confirmRequest = adminPage.waitForRequest((request) =>
+      request.method() === 'POST' && request.url().includes(`/commerce/orders/${createdOrderId}/payments/manual-confirm`),
+    );
+    const confirmPaymentResponse = adminPage.waitForResponse((response) =>
+      response.request().method() === 'POST' && response.url().includes(`/commerce/orders/${createdOrderId}/payments/manual-confirm`),
+    );
+    await adminPage.getByRole('button', { name: /Подтвердить оплату/ }).click();
 
-    // Should see "Заказ" modal with payment confirmation section
-    // Commerce.tsx OrdersTab: Modal title="Заказ", confirm section with "Подтвердить оплату"
-    await expect(adminPage.getByText('Подтвердить оплату')).toBeVisible();
+    const confirmBody = (await confirmRequest).postDataJSON() as Record<string, unknown>;
+    expect(confirmBody.external_reference).toBe('e2e-payment-001');
+    expect(confirmBody.amount_minor).toBe(49000);
+    expect(confirmBody.amount_confirmed_minor).toBeUndefined();
+    expect(confirmBody.currency).toBe('RUB');
+    expect(confirmBody.paid_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(confirmBody.override).toBeUndefined();
 
-    // Fill in payment confirmation
-    // Commerce.tsx: Input placeholder="ID транзакции, номер квитанции..."
-    await adminPage
-      .getByPlaceholder(/ID транзакции/i)
-      .fill('e2e-payment-001');
+    const confirmPaymentResult = await confirmPaymentResponse;
+    expect(confirmPaymentResult.ok()).toBeTruthy();
 
-    // Click "Подтвердить оплату" button
-    // Commerce.tsx: <Button variant="success">Подтвердить оплату</Button>
-    await adminPage
-      .getByRole('button', { name: /Подтвердить оплату/ })
-      .click();
-
-    // Modal should close, order status should update
-    await expect(adminPage.getByText('Выполнен')).toBeVisible();
+    const fulfilledOrder = await pollForValue(fetchMatchingOrder, value => (value as Record<string, unknown> | null)?.status === 'fulfilled', 15000);
+    expect((fulfilledOrder as Record<string, unknown> | null)?.status).toBe('fulfilled');
+    await expect(orderRow.getByText('Выполнен')).toBeVisible({ timeout: 10000 });
 
     // -----------------------------------------------------------------------
     // Phase 3: Student sees the lesson is now accessible
@@ -139,11 +207,11 @@ test.describe('Gate 2 -- Paid lesson flow', () => {
       studentPage.getByText('Что нельзя рассказывать в интернете'),
     ).toBeVisible();
 
-    // The lesson should be startable -- look for a start button or
-    // verify the lock indicator is gone
     await expect(
       studentPage.getByRole('button', { name: 'Оставить заявку' }),
     ).not.toBeVisible();
+    await expect(studentPage.getByText('Ожидает подтверждения')).not.toBeVisible();
+    await expect(studentPage.getByRole('button', { name: /Начать миссию|Продолжить/i }).first()).toBeVisible();
 
     // Cleanup
     await studentContext.close();

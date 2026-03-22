@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ComicPanel } from '../../components/ui';
 import type { Role } from '../../api/types';
@@ -18,15 +18,50 @@ const REDIRECTS: Record<string, string> = {
 };
 
 export default function RoleSelect() {
-  const { selectRole } = useAuth();
+  const { loading, session, selectRole } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [selecting, setSelecting] = useState(false);
+  const returnTo = searchParams.get('return_to');
+
+  useEffect(() => {
+    if (loading || selecting || !session?.authenticated || session.onboarding.role_selection_required) {
+      return;
+    }
+
+    if (returnTo && session.user?.role === 'student') {
+      navigate(returnTo, { replace: true });
+      return;
+    }
+
+    switch (session.user?.role) {
+      case 'student':
+        navigate('/student/courses', { replace: true });
+        return;
+      case 'parent':
+        navigate('/parent', { replace: true });
+        return;
+      case 'teacher':
+        navigate('/teacher-onboarding', { replace: true });
+        return;
+      case 'admin':
+        navigate('/admin', { replace: true });
+        return;
+      default:
+        return;
+    }
+  }, [loading, navigate, returnTo, selecting, session]);
 
   const handleSelect = async (role: Role) => {
     setSelecting(true);
     try {
       await selectRole(role);
-      navigate(REDIRECTS[role] ?? '/');
+      const destination = REDIRECTS[role] ?? '/';
+      if (returnTo && role === 'student') {
+        navigate(`${destination}?return_to=${encodeURIComponent(returnTo)}`);
+        return;
+      }
+      navigate(destination);
     } catch {
       setSelecting(false);
     }

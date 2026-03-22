@@ -157,6 +157,32 @@ export interface StepView {
   game_state: GameStateMini;
 }
 
+export interface PreviewStepView {
+  session_id: string;
+  course_id: string;
+  lesson_id: string;
+  state_version: number;
+  node_id: string;
+  node_kind: string;
+  payload: Record<string, unknown>;
+  steps_completed: number;
+  steps_total: number;
+  progress_ratio: number;
+}
+
+export interface PreviewSessionView {
+  preview: true;
+  preview_session_id: string;
+  step: PreviewStepView;
+}
+
+export interface PreviewAnswerView {
+  preview: true;
+  verdict: 'correct' | 'partial' | 'incorrect';
+  feedback_text: string;
+  next_step: PreviewStepView | null;
+}
+
 export interface AnswerOutcome {
   verdict: 'correct' | 'partial' | 'incorrect';
   feedback_text: string;
@@ -222,8 +248,10 @@ export interface ChildCourseProgress {
 export interface LinkInvite {
   invite_id: string;
   status: 'active' | 'claimed' | 'expired' | 'revoked';
-  invite_url: string;
-  created_at: string;
+  invite_url?: string;
+  claim_url?: string;
+  url_status: 'available' | 'legacy_unavailable';
+  created_at?: string;
   expires_at: string;
   claimed_by?: string;
 }
@@ -290,11 +318,22 @@ export interface GraphEdge {
   condition?: string;
 }
 
+export function isBackendLessonGraph(rawGraph: unknown): rawGraph is Record<string, unknown> {
+  if (!rawGraph || typeof rawGraph !== 'object') return false;
+  const graph = rawGraph as Record<string, unknown>;
+  const rawNodes = Array.isArray(graph.nodes) ? graph.nodes as Array<Record<string, unknown>> : [];
+  if (rawNodes.some(node => typeof node?.kind === 'string')) return true;
+  if (rawNodes.some(node => typeof node?.type === 'string')) return false;
+  return Array.isArray(graph.nodes) && !Array.isArray(graph.edges);
+}
+
 /**
  * Convert editor graph (type/data/edges) to backend format (kind/nextNodeId/options/transitions).
  */
 export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown> {
-  const { startNodeId, nodes, edges } = graph;
+  const startNodeId = graph.startNodeId ?? '';
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
 
   // Build edge map: fromId -> toId (for simple linear edges)
   const edgeMap = new Map<string, string>();
@@ -345,7 +384,7 @@ export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown
         kind,
         prompt: (node.data.question_text as string) ?? '',
         rubric: {
-          reference_answer: (node.data.reference_answer ?? node.data.expected_answer ?? '') as string,
+          referenceAnswer: (node.data.reference_answer ?? node.data.expected_answer ?? '') as string,
           criteria: (node.data.criteria as string) ?? '',
         },
         transitions: [
@@ -380,10 +419,11 @@ export function graphFromBackendFormat(raw: Record<string, unknown>): LessonGrap
     const kind = (rn.kind as string) ?? (rn.type as string) ?? 'story';
     const type = kind === 'end' ? 'terminal' : kind as GraphNode['type'];
     const data: Record<string, unknown> = {};
+    const body = (rn.body as Record<string, unknown>) ?? {};
 
     if (kind === 'story') {
-      data.text = (rn.text as string) ?? '';
-      data.illustration_url = (rn.asset_url as string) ?? '';
+      data.text = (rn.text ?? body.text ?? '') as string;
+      data.illustration_url = (rn.asset_url ?? body.assetUrl ?? body.asset_url ?? '') as string;
       const nextNodeId = (rn.nextNodeId as string) ?? '';
       if (nextNodeId) edges.push({ from: id, to: nextNodeId });
     } else if (kind === 'single_choice') {
@@ -404,12 +444,14 @@ export function graphFromBackendFormat(raw: Record<string, unknown>): LessonGrap
     } else if (kind === 'free_text') {
       data.question_text = (rn.prompt as string) ?? '';
       const rubric = (rn.rubric as Record<string, unknown>) ?? {};
-      data.reference_answer = (rubric.reference_answer as string) ?? '';
+      data.reference_answer = (rubric.referenceAnswer ?? rubric.reference_answer ?? '') as string;
       data.criteria = (rubric.criteria as string) ?? '';
       const transitions = (rn.transitions as Array<Record<string, unknown>>) ?? [];
       const correctTransition = transitions.find(t => (t.onVerdict as string) === 'correct');
       const nextId = (correctTransition?.nextNodeId as string) ?? '';
       if (nextId) edges.push({ from: id, to: nextId });
+    } else if (kind === 'end') {
+      data.text = (rn.text ?? body.text ?? '') as string;
     }
 
     nodes.push({ id, type, data });
@@ -429,8 +471,16 @@ export interface TeacherStudent {
 }
 
 export interface TeacherStudentDetail {
-  student_id: string;
-  display_name: string;
+  student: {
+    student_id: string;
+    display_name: string;
+    avatar_url?: string;
+  };
+  summary: {
+    progress_percent: number;
+    xp_total: number;
+    correctness_percent: number;
+  };
   lessons: TeacherStudentLesson[];
 }
 
@@ -454,8 +504,10 @@ export interface ReviewStatus {
 export interface AccessLink {
   link_id: string;
   status: 'active' | 'expired' | 'revoked';
-  invite_url: string;
-  created_at: string;
+  invite_url?: string;
+  claim_url?: string;
+  url_status?: 'available' | 'legacy_unavailable';
+  created_at?: string;
   expires_at?: string;
 }
 
@@ -530,6 +582,22 @@ export interface CommercialOrder {
   price_currency: string;
   created_at: string;
   fulfilled_at?: string;
+}
+
+export interface UpdateDraftInput {
+  draft_version: number;
+  title: string;
+  description: string;
+  age_min?: number;
+  age_max?: number;
+  cover_asset_id?: string;
+  content_json: CourseContent;
+}
+
+export interface ManualOrderInput {
+  student_id: string;
+  offer_id: string;
+  purchase_request_id?: string;
 }
 
 /* ===== Promo ===== */

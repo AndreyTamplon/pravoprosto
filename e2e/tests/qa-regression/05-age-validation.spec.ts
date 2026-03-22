@@ -1,59 +1,66 @@
-/**
- * QA Regression: UX issues — Course form validation
- *
- * QA found:
- *   - No validation on age fields (allows fractional/negative numbers)
- *   - Save fails silently with Internal Server Error
- *   - Publish doesn't work from admin UI
- *
- * RED gate: admin can enter fractional age, save fails with 500
- * GREEN gate: age validated as positive integer, save succeeds
- */
 import { test, expect } from '@playwright/test';
 
-test.describe('QA: Course form validation and admin publish', () => {
-  test('admin can create, save draft, and publish a platform course', async ({ browser }) => {
+test.describe('QA: Admin course create/save/publish flow', () => {
+  test('admin saves integer age fields and publishes a new platform course', async ({ browser }) => {
     const adminCtx = await browser.newContext({ storageState: '.auth/admin.json' });
     const page = await adminCtx.newPage();
+    const courseTitle = `QA Publish ${Date.now()}`;
 
-    // Navigate to admin courses
     await page.goto('/admin/courses');
-    await expect(page.getByRole('heading', { name: /Курсы/ })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: 'Курсы' })).toBeVisible({ timeout: 10000 });
 
-    // Create a new course
-    const createBtn = page.getByRole('button', { name: /Создать курс/i });
-    const canCreate = await createBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    await page.getByRole('button', { name: /Создать курс/i }).click();
+    const createDialog = page.getByRole('dialog', { name: 'Создать курс' });
+    await expect(createDialog).toBeVisible();
+    await createDialog.getByLabel('Название').fill(courseTitle);
+    await createDialog.getByLabel('Описание').fill('Курс для проверки create/save/publish из админки');
+    await createDialog.getByRole('button', { name: 'Создать', exact: true }).click();
 
-    if (canCreate) {
-      await createBtn.click();
-      await page.waitForTimeout(1000);
+    await page.waitForURL(/\/admin\/courses\/[^/]+$/);
+    await expect(page.getByLabel('Название курса')).toHaveValue(courseTitle);
+    await expect(page.getByRole('button', { name: 'Сохранить' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Опубликовать' })).toBeVisible();
 
-      // Fill course info
-      const titleInput = page.getByPlaceholder(/название/i).or(page.getByLabel(/Название/i)).first();
-      await titleInput.fill('QA Тестовый курс');
+    await page.getByLabel('Возраст от').fill('8');
+    await page.getByLabel('Возраст до').fill('12');
 
-      const descInput = page.getByPlaceholder(/описание|описан/i).or(page.getByLabel(/Описание/i)).first();
-      await descInput.fill('Курс для регрессионного теста');
+    await page.getByRole('button', { name: /\+ Модуль/i }).click();
+    const moduleDialog = page.getByRole('dialog', { name: 'Новый модуль' });
+    await expect(moduleDialog).toBeVisible();
+    await moduleDialog.getByLabel('Название модуля').fill('Модуль QA');
+    await moduleDialog.getByRole('button', { name: 'Добавить' }).click();
 
-      await page.getByRole('button', { name: 'Создать', exact: true }).click();
-      await page.waitForURL(/\/admin\/courses\//);
-    }
+    await page.getByRole('button', { name: /\+ Урок/i }).click();
+    const lessonDialog = page.getByRole('dialog', { name: 'Новый урок' });
+    await expect(lessonDialog).toBeVisible();
+    await lessonDialog.getByLabel('Название урока').fill('Урок QA');
+    await lessonDialog.getByRole('button', { name: 'Добавить' }).click();
 
-    // We should be on the course editor page
-    // Verify that we can see the editor and it's functional
-    await page.waitForTimeout(2000);
+    const saveRequest = page.waitForRequest((request) =>
+      request.method() === 'PUT' && request.url().includes('/draft'),
+    );
+    const saveResponse = page.waitForResponse((response) =>
+      response.request().method() === 'PUT' && response.url().includes('/draft'),
+    );
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    const saveBody = (await saveRequest).postDataJSON() as Record<string, unknown>;
+    expect(saveBody.age_min).toBe(8);
+    expect(saveBody.age_max).toBe(12);
+    expect((await saveResponse).ok()).toBeTruthy();
+    await expect(page.getByText('Сохранено!')).toBeVisible();
+    await expect(page.getByText(/Internal Server Error|500/i)).not.toBeVisible();
 
-    // Try to save — should not get 500
-    const saveBtn = page.getByRole('button', { name: /Сохранить/i });
-    const hasSave = await saveBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    if (hasSave) {
-      await saveBtn.click();
-      await page.waitForTimeout(2000);
+    const publishResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST' && response.url().includes('/publish'),
+    );
+    await page.getByRole('button', { name: 'Опубликовать' }).click();
+    expect((await publishResponse).ok()).toBeTruthy();
 
-      // Should not show server error
-      const hasError = await page.getByText(/Internal Server Error|500/i).isVisible({ timeout: 2000 }).catch(() => false);
-      expect(hasError).toBeFalsy();
-    }
+    await page.goto('/admin/courses');
+    await expect(page.getByRole('cell', { name: courseTitle })).toBeVisible({ timeout: 10000 });
+    const row = page.getByRole('row', { name: new RegExp(courseTitle) });
+    await expect(row.getByText('Опубликован')).toBeVisible();
+    await expect(row.getByRole('cell').nth(3)).toHaveText('1');
 
     await adminCtx.close();
   });

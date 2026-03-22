@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,13 +54,36 @@ type BasicProfileView struct {
 type UpdateProfileInput struct {
 	DisplayName      string  `json:"display_name"`
 	AvatarAssetID    *string `json:"avatar_asset_id"`
+	AvatarProvided   bool    `json:"-"`
 	OrganizationName *string `json:"organization_name,omitempty"`
 }
 
 func DecodeUpdateProfile(r *http.Request) (UpdateProfileInput, error) {
-	var input UpdateProfileInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		return UpdateProfileInput{}, err
+	}
+
+	var input UpdateProfileInput
+	if value, ok := raw["display_name"]; ok {
+		if err := json.Unmarshal(value, &input.DisplayName); err != nil {
+			return UpdateProfileInput{}, err
+		}
+	}
+	if value, ok := raw["organization_name"]; ok {
+		orgName, err := decodeOptionalString(value)
+		if err != nil {
+			return UpdateProfileInput{}, err
+		}
+		input.OrganizationName = orgName
+	}
+	if value, ok := raw["avatar_asset_id"]; ok {
+		avatarAssetID, err := decodeOptionalString(value)
+		if err != nil {
+			return UpdateProfileInput{}, err
+		}
+		input.AvatarAssetID = avatarAssetID
+		input.AvatarProvided = true
 	}
 	return input, nil
 }
@@ -180,9 +204,11 @@ func (s *Service) UpdateStudent(ctx context.Context, accountID string, input Upd
 	}
 	_, err := s.db.Exec(ctx, `
 		update student_profiles
-		set display_name = $2, avatar_asset_id = $3, updated_at = now()
+		set display_name = $2,
+		    avatar_asset_id = case when $3 then $4 else avatar_asset_id end,
+		    updated_at = now()
 		where account_id = $1
-	`, accountID, input.DisplayName, nullableUUID(input.AvatarAssetID))
+	`, accountID, input.DisplayName, input.AvatarProvided, nullableUUID(input.AvatarAssetID))
 	if err != nil {
 		return StudentProfileView{}, err
 	}
@@ -197,9 +223,9 @@ func (s *Service) UpdateBasic(ctx context.Context, role string, accountID string
 	if err != nil {
 		return BasicProfileView{}, err
 	}
-	args := []any{accountID, input.DisplayName, nullableUUID(input.AvatarAssetID)}
+	args := []any{accountID, input.DisplayName, input.AvatarProvided, nullableUUID(input.AvatarAssetID)}
 	if role == "teacher" {
-		args = []any{accountID, input.DisplayName, input.OrganizationName, nullableUUID(input.AvatarAssetID)}
+		args = []any{accountID, input.DisplayName, input.OrganizationName, input.AvatarProvided, nullableUUID(input.AvatarAssetID)}
 	}
 	if _, err := s.db.Exec(ctx, query, args...); err != nil {
 		return BasicProfileView{}, err
@@ -273,16 +299,27 @@ func basicProfileQuery(role string) (string, error) {
 func basicProfileUpdateQuery(role string) (string, error) {
 	switch role {
 	case "student":
-		return `update student_profiles set display_name = $2, avatar_asset_id = $3, updated_at = now() where account_id = $1`, nil
+		return `update student_profiles set display_name = $2, avatar_asset_id = case when $3 then $4 else avatar_asset_id end, updated_at = now() where account_id = $1`, nil
 	case "parent":
-		return `update parent_profiles set display_name = $2, avatar_asset_id = $3, updated_at = now() where account_id = $1`, nil
+		return `update parent_profiles set display_name = $2, avatar_asset_id = case when $3 then $4 else avatar_asset_id end, updated_at = now() where account_id = $1`, nil
 	case "teacher":
-		return `update teacher_profiles set display_name = $2, organization_name = $3, avatar_asset_id = $4, updated_at = now() where account_id = $1`, nil
+		return `update teacher_profiles set display_name = $2, organization_name = $3, avatar_asset_id = case when $4 then $5 else avatar_asset_id end, updated_at = now() where account_id = $1`, nil
 	case "admin":
-		return `update admin_profiles set display_name = $2, avatar_asset_id = $3, updated_at = now() where account_id = $1`, nil
+		return `update admin_profiles set display_name = $2, avatar_asset_id = case when $3 then $4 else avatar_asset_id end, updated_at = now() where account_id = $1`, nil
 	default:
 		return "", fmt.Errorf("invalid_profile_role")
 	}
+}
+
+func decodeOptionalString(value json.RawMessage) (*string, error) {
+	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return nil, nil
+	}
+	var out string
+	if err := json.Unmarshal(value, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func nullableUUID(value *string) any {

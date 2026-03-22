@@ -946,6 +946,40 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusOK, view)
 			}))
+			ar.Get("/moderation/reviews/{reviewID}/draft", requireRole("admin", deps, func(w http.ResponseWriter, r *http.Request) {
+				view, err := deps.Courses.ModerationDraft(r.Context(), chi.URLParam(r, "reviewID"))
+				if err != nil {
+					switch err {
+					case courses.ErrReviewNotFound:
+						writeError(w, http.StatusNotFound, "review_not_found", "Review not found", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}))
+			ar.Post("/moderation/reviews/{reviewID}/preview", requireRole("admin", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				input, err := courses.DecodePreviewStart(r)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+					return
+				}
+				view, err := deps.Courses.StartModerationPreview(r.Context(), session.AccountID, chi.URLParam(r, "reviewID"), input.LessonID)
+				if err != nil {
+					switch err {
+					case courses.ErrReviewNotFound:
+						writeError(w, http.StatusNotFound, "review_not_found", "Review not found", nil)
+					case courses.ErrDraftValidationFailed:
+						writeError(w, http.StatusUnprocessableEntity, "draft_validation_failed", "Draft contains validation errors", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}, deps)))
 			ar.Get("/commerce/offers", requireRole("admin", deps, func(w http.ResponseWriter, r *http.Request) {
 				view, err := deps.Commerce.ListOffers(r.Context())
 				if err != nil {
@@ -1213,13 +1247,14 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/preview-sessions/{previewSessionID}/next", requireAnyRole([]string{"teacher", "admin"}, deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 			session, _ := sessionFromContext(r.Context())
 			var body struct {
-				StateVersion int64 `json:"state_version"`
+				StateVersion   int64  `json:"state_version"`
+				ExpectedNodeID string `json:"expected_node_id"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
 				return
 			}
-			view, err := deps.Courses.PreviewNext(r.Context(), session.Role, session.AccountID, chi.URLParam(r, "previewSessionID"), body.StateVersion)
+			view, err := deps.Courses.PreviewNext(r.Context(), session.Role, session.AccountID, chi.URLParam(r, "previewSessionID"), body.StateVersion, body.ExpectedNodeID)
 			if err != nil {
 				switch err {
 				case courses.ErrPreviewSessionNotFound:
@@ -1237,6 +1272,20 @@ func NewRouter(deps Dependencies) http.Handler {
 			}
 			writeJSON(w, http.StatusOK, view)
 		}, deps)))
+		r.Get("/preview-sessions/{previewSessionID}", requireAnyRole([]string{"teacher", "admin"}, deps, func(w http.ResponseWriter, r *http.Request) {
+			session, _ := sessionFromContext(r.Context())
+			view, err := deps.Courses.PreviewSession(r.Context(), session.Role, session.AccountID, chi.URLParam(r, "previewSessionID"))
+			if err != nil {
+				switch err {
+				case courses.ErrPreviewSessionNotFound:
+					writeError(w, http.StatusNotFound, "preview_session_not_found", "Preview session not found", nil)
+				default:
+					writeInternalError(w)
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
+		}))
 		r.Post("/preview-sessions/{previewSessionID}/answer", requireAnyRole([]string{"teacher", "admin"}, deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 			session, _ := sessionFromContext(r.Context())
 			var body struct {

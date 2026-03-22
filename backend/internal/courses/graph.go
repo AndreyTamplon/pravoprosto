@@ -215,6 +215,15 @@ func ptrStep(step StepView) *StepView {
 	return &step
 }
 
+func buildPreviewEnvelope(session *previewSession) PreviewStepEnvelope {
+	node := session.Graph.NodeMap[session.CurrentID]
+	return PreviewStepEnvelope{
+		Preview:          true,
+		PreviewSessionID: session.ID,
+		Step:             buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, node),
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

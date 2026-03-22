@@ -1,9 +1,12 @@
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ComicPanel } from '../../components/ui';
 import styles from './AuthPage.module.css';
 
 export default function AuthPage() {
   const { login } = useAuth();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('return_to') ?? undefined;
 
   return (
     <div className={styles.page}>
@@ -17,7 +20,7 @@ export default function AuthPage() {
         <button
           type="button"
           className={styles.yandexBtn}
-          onClick={() => login('yandex')}
+          onClick={() => login('yandex', returnTo)}
         >
           Войти через Яндекс
         </button>

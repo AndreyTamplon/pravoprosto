@@ -7,7 +7,7 @@ import {
   createTeacherPreview,
 } from '../../api/client';
 import type { CourseDraft, ContentModule, GraphNode, GraphEdge, LessonGraph } from '../../api/types';
-import { graphToBackendFormat, graphFromBackendFormat } from '../../api/types';
+import { graphToBackendFormat, graphFromBackendFormat, isBackendLessonGraph } from '../../api/types';
 import { Button, ComicPanel, Badge, Spinner, Textarea, Modal } from '../../components/ui';
 import s from './LessonConstructor.module.css';
 
@@ -74,6 +74,24 @@ const nodeTypeLabels: Record<string, { label: string; color: 'blue' | 'orange' |
   terminal: { label: 'Завершение', color: 'lime' },
 };
 
+function isPlaceholderGraph(graph: LessonGraph): boolean {
+  if (graph.startNodeId !== 'start' || graph.nodes.length !== 2 || graph.edges.length !== 1) {
+    return false;
+  }
+
+  const storyNode = graph.nodes.find(node => node.id === 'start' && node.type === 'story');
+  const endNode = graph.nodes.find(node => node.id === 'end' && node.type === 'terminal');
+  const edge = graph.edges[0];
+
+  return Boolean(
+    storyNode
+      && endNode
+      && edge?.from === 'start'
+      && edge?.to === 'end'
+      && ((storyNode.data.text as string | undefined) ?? '') === '',
+  );
+}
+
 export default function LessonConstructor() {
   const { courseId, lessonId } = useParams<{
     courseId: string;
@@ -90,6 +108,7 @@ export default function LessonConstructor() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [startNodeId, setStartNodeId] = useState('');
+  const [draftVersion, setDraftVersion] = useState(0);
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -104,23 +123,35 @@ export default function LessonConstructor() {
 
   useEffect(() => {
     if (!draft) return;
+    setDraftVersion(draft.draft_version);
     for (const mod of draft.content_json?.modules ?? []) {
       const lesson = mod.lessons.find(l => l.id === lessonId);
       if (lesson) {
         setLessonTitle(lesson.title);
         // Detect backend format (nodes have 'kind' not 'type') and convert
         const rawGraph = lesson.graph as Record<string, unknown>;
-        const rawNodes = (rawGraph?.nodes as Array<Record<string, unknown>>) ?? [];
-        const isBackendFormat = rawNodes.length > 0 && rawNodes[0].kind;
-        if (isBackendFormat) {
+        if (isBackendLessonGraph(rawGraph)) {
           const converted = graphFromBackendFormat(rawGraph);
-          setNodes(converted.nodes);
-          setEdges(converted.edges);
-          setStartNodeId(converted.startNodeId);
+          if (isPlaceholderGraph(converted)) {
+            setNodes([]);
+            setEdges([]);
+            setStartNodeId('');
+          } else {
+            setNodes(converted.nodes);
+            setEdges(converted.edges);
+            setStartNodeId(converted.startNodeId);
+          }
         } else {
-          setNodes(lesson.graph?.nodes ?? []);
-          setEdges(lesson.graph?.edges ?? []);
-          setStartNodeId(lesson.graph?.startNodeId ?? '');
+          const editorGraph = lesson.graph ?? { startNodeId: '', nodes: [], edges: [] };
+          if (isPlaceholderGraph(editorGraph)) {
+            setNodes([]);
+            setEdges([]);
+            setStartNodeId('');
+          } else {
+            setNodes(editorGraph.nodes ?? []);
+            setEdges(editorGraph.edges ?? []);
+            setStartNodeId(editorGraph.startNodeId ?? '');
+          }
         }
         break;
       }
@@ -274,8 +305,10 @@ export default function LessonConstructor() {
   };
 
   // Save
-  const handleSave = useCallback(async () => {
-    if (!draft) return;
+  const handleSave = useCallback(async (): Promise<number> => {
+    if (!draft || !moduleId || !lessonId || !courseId) {
+      throw new Error('Черновик урока не найден');
+    }
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -298,19 +331,27 @@ export default function LessonConstructor() {
         };
       });
 
-      const dv = draft?.draft_version ?? 1;
-      await updateTeacherDraft(courseId!, {
-        draft_version: dv,
+      const result = await updateTeacherDraft(courseId, {
+        draft_version: draftVersion,
+        title: draft.title,
+        description: draft.description,
+        age_min: draft.age_min,
+        age_max: draft.age_max,
+        cover_asset_id: draft.cover_asset_id,
         content_json: { modules: updatedModules },
       });
+      setDraftVersion(result.draft_version);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+      return result.draft_version;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+      const message = err instanceof Error ? err.message : 'Ошибка сохранения';
+      setError(message);
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       setSaving(false);
     }
-  }, [draft, courseId, moduleId, lessonId, lessonTitle, nodes, edges, startNodeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [courseId, draft, draftVersion, edges, lessonId, lessonTitle, moduleId, nodes, startNodeId]);
 
   // Preview
   const handlePreview = useCallback(async () => {
@@ -319,7 +360,7 @@ export default function LessonConstructor() {
     try {
       await handleSave();
       const session = await createTeacherPreview(courseId!, lessonId!);
-      navigate(`/teacher/preview/${session.session_id}`);
+      navigate(`/teacher/preview/${session.preview_session_id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
     } finally {
@@ -351,7 +392,7 @@ export default function LessonConstructor() {
             placeholder="Название этапа..."
           />
           <div className={s.headerActions}>
-            <Button onClick={handleSave} disabled={saving} size="sm">
+            <Button onClick={() => { void handleSave().catch(() => undefined); }} disabled={saving} size="sm">
               {saving ? 'Сохранение...' : 'Сохранить'}
             </Button>
             <Button variant="secondary" size="sm" onClick={handlePreview} disabled={previewing}>

@@ -24,6 +24,7 @@ type runtimeNode struct {
 	Kind        string
 	NextNodeID  string
 	Text        string
+	AssetURL    string
 	Prompt      string
 	Options     []runtimeOption
 	Transitions map[string]string
@@ -269,6 +270,18 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 
 	var offerID, offerTargetType, title, priceCurrency string
 	var priceAmountMinor int64
+	var hasOpenRequest bool
+	if err := db.QueryRow(ctx, `
+		select exists(
+		    select 1
+		    from purchase_requests pr
+		    join commercial_offers o on o.id = pr.offer_id
+		    where pr.student_id = $1 and pr.status = 'open' and o.target_course_id = $2
+		      and (o.target_type = 'course' or (o.target_type = 'lesson' and o.target_lesson_id = $3))
+		)
+	`, studentID, courseID, lessonID).Scan(&hasOpenRequest); err != nil {
+		return "", nil, nil, err
+	}
 	err = db.QueryRow(ctx, `
 		select id::text, target_type, title, price_amount_minor, price_currency
 		from commercial_offers
@@ -284,6 +297,7 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 			"title":              title,
 			"price_amount_minor": priceAmountMinor,
 			"price_currency":     priceCurrency,
+			"has_open_request":   hasOpenRequest,
 		}, nil, nil
 	}
 	if err != pgx.ErrNoRows {
@@ -414,12 +428,19 @@ func parseGraph(raw any) runtimeGraph {
 			Kind:        asStringAny(nodeMap["kind"]),
 			NextNodeID:  asStringAny(nodeMap["nextNodeId"]),
 			Text:        asStringAny(nodeMap["text"]),
+			AssetURL:    asStringAny(nodeMap["asset_url"]),
 			Prompt:      asStringAny(nodeMap["prompt"]),
 			Transitions: map[string]string{},
 		}
 		if body, ok := nodeMap["body"].(map[string]any); ok {
 			if node.Text == "" {
 				node.Text = asStringAny(body["text"])
+			}
+			if node.AssetURL == "" {
+				node.AssetURL = asStringAny(body["assetUrl"])
+			}
+			if node.AssetURL == "" {
+				node.AssetURL = asStringAny(body["asset_url"])
 			}
 		}
 		if options, ok := nodeMap["options"].([]any); ok {
@@ -455,6 +476,10 @@ func renderStep(sessionID string, courseID string, lessonID string, stateVersion
 	switch node.Kind {
 	case "story", "end":
 		payload["text"] = node.Text
+		if node.AssetURL != "" {
+			payload["asset_url"] = node.AssetURL
+			payload["illustration_url"] = node.AssetURL
+		}
 	case "single_choice":
 		payload["prompt"] = node.Prompt
 		options := make([]map[string]any, 0, len(node.Options))

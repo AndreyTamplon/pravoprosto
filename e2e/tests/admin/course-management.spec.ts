@@ -20,11 +20,10 @@ test.describe('Admin: Course management', () => {
     }
 
     // Platform course "Безопасность в интернете" must be visible
-    await expect(page.getByRole('cell', { name: 'Безопасность в интернете' })).toBeVisible();
-    // Type badge "Платформа" in the row
-    await expect(page.getByRole('cell', { name: 'Платформа' })).toBeVisible();
-    // Status badge "Опубликован"
-    await expect(page.getByRole('cell', { name: 'Опубликован' })).toBeVisible();
+    const platformRow = page.getByRole('row', { name: /Безопасность в интернете/ });
+    await expect(platformRow.getByRole('cell', { name: 'Безопасность в интернете' })).toBeVisible();
+    await expect(platformRow.getByRole('cell', { name: 'Платформа' })).toBeVisible();
+    await expect(platformRow.getByRole('cell', { name: 'Опубликован' })).toBeVisible();
   });
 
   test('filter buttons switch between platform and teacher views', async ({ page }) => {
@@ -38,13 +37,9 @@ test.describe('Admin: Course management', () => {
     await page.getByRole('button', { name: 'Платформа' }).click();
     await expect(page.getByRole('cell', { name: 'Безопасность в интернете' })).toBeVisible();
 
-    // Filter to "Учителя" — may have teacher courses or may be empty
+    // Filter to "Учителя" — seeded teacher course must be present
     await page.getByRole('button', { name: 'Учителя' }).click();
-    // Either teacher courses appear or "Нет курсов" empty state
-    await expect(
-      page.getByText('Покупки онлайн')
-        .or(page.getByText('Нет курсов'))
-    ).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Покупки онлайн' })).toBeVisible();
 
     // Back to "Все"
     await page.getByRole('button', { name: 'Все' }).click();

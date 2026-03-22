@@ -26,12 +26,14 @@ test.describe('Gate 2 -- Teacher publish and multi-role flow', () => {
     await expect(teacherPage.locator('input[placeholder="Название модуля..."]').first()).toBeVisible();
 
     await teacherPage.getByRole('button', { name: /Добавить этап/i }).click();
-    await teacherPage.waitForTimeout(500);
     await expect(teacherPage.getByText(/Этап 1/)).toBeVisible();
 
     // Save
+    const saveResponse = teacherPage.waitForResponse((response) =>
+      response.request().method() === 'PUT' && response.url().includes('/teacher/courses/') && response.url().includes('/draft'),
+    );
     await teacherPage.getByRole('button', { name: 'Сохранить' }).click();
-    await teacherPage.waitForTimeout(1000);
+    expect((await saveResponse).ok()).toBeTruthy();
 
     // Verify course appears on dashboard
     await teacherPage.goto('/teacher');

@@ -10,7 +10,7 @@ interface AuthState {
 
 interface AuthContextType extends AuthState {
   refresh: () => Promise<void>;
-  login: (provider?: string) => void;
+  login: (provider?: string, returnTo?: string) => void;
   logout: () => Promise<void>;
   selectRole: (role: Role) => Promise<void>;
 }
@@ -34,9 +34,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const login = useCallback((provider = 'yandex') => {
-    const returnTo = window.location.pathname + window.location.search;
-    window.location.href = `/api/v1/auth/sso/${provider}/start?return_to=${encodeURIComponent(returnTo)}`;
+  const login = useCallback((provider = 'yandex', returnTo?: string) => {
+    const destination = returnTo ?? (window.location.pathname + window.location.search + window.location.hash);
+    window.location.href = `/api/v1/auth/sso/${provider}/start?return_to=${encodeURIComponent(destination)}`;
   }, []);
 
   const logout = useCallback(async () => {

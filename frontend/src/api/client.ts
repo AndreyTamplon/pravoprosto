@@ -64,6 +64,95 @@ async function getList<T>(path: string, key = 'items'): Promise<T[]> {
   return (Array.isArray(arr) ? arr : []) as T[];
 }
 
+function normalizeLinkInvite(raw: Record<string, unknown>): import('./types').LinkInvite {
+  const inviteURL = (raw.invite_url ?? raw.claim_url) as string | undefined;
+  return {
+    invite_id: (raw.invite_id ?? '') as string,
+    status: (raw.status ?? 'active') as import('./types').LinkInvite['status'],
+    invite_url: inviteURL && inviteURL.trim() !== '' ? inviteURL : undefined,
+    claim_url: (raw.claim_url as string) ?? undefined,
+    url_status: (raw.url_status ?? (inviteURL ? 'available' : 'legacy_unavailable')) as import('./types').LinkInvite['url_status'],
+    created_at: (raw.created_at as string) ?? undefined,
+    expires_at: (raw.expires_at ?? '') as string,
+    claimed_by: (raw.claimed_by as string) ?? undefined,
+  };
+}
+
+function normalizeAccessLink(raw: Record<string, unknown>): import('./types').AccessLink {
+  const inviteURL = (raw.invite_url ?? raw.claim_url) as string | undefined;
+  return {
+    link_id: (raw.link_id ?? '') as string,
+    status: (raw.status ?? 'active') as import('./types').AccessLink['status'],
+    invite_url: inviteURL && inviteURL.trim() !== '' ? inviteURL : undefined,
+    claim_url: (raw.claim_url as string) ?? undefined,
+    url_status: (raw.url_status ?? (inviteURL ? 'available' : 'legacy_unavailable')) as import('./types').AccessLink['url_status'],
+    created_at: (raw.created_at as string) ?? undefined,
+    expires_at: (raw.expires_at as string) ?? undefined,
+  };
+}
+
+function normalizePreviewStep(raw: Record<string, unknown>): import('./types').PreviewStepView {
+  return {
+    session_id: (raw.session_id ?? '') as string,
+    course_id: (raw.course_id ?? '') as string,
+    lesson_id: (raw.lesson_id ?? '') as string,
+    state_version: (raw.state_version ?? 0) as number,
+    node_id: (raw.node_id ?? '') as string,
+    node_kind: (raw.node_kind ?? '') as string,
+    payload: ((raw.payload as Record<string, unknown>) ?? {}),
+    steps_completed: (raw.steps_completed ?? 0) as number,
+    steps_total: (raw.steps_total ?? 0) as number,
+    progress_ratio: (raw.progress_ratio ?? 0) as number,
+  };
+}
+
+function normalizePreviewSession(raw: Record<string, unknown>): import('./types').PreviewSessionView {
+  const step = normalizePreviewStep((raw.step ?? {}) as Record<string, unknown>);
+  return {
+    preview: true,
+    preview_session_id: (raw.preview_session_id ?? step.session_id ?? '') as string,
+    step,
+  };
+}
+
+function normalizeTeacherStudentDetail(raw: Record<string, unknown>): import('./types').TeacherStudentDetail {
+  const student = (raw.student ?? {}) as Record<string, unknown>;
+  const summary = (raw.summary ?? {}) as Record<string, unknown>;
+  const lessons = ((raw.lessons ?? []) as Array<Record<string, unknown>>).map(lesson => ({
+    lesson_id: (lesson.lesson_id ?? '') as string,
+    title: (lesson.title ?? '') as string,
+    status: (lesson.status ?? 'not_started') as string,
+    best_verdict: (lesson.best_verdict as string) ?? undefined,
+    attempts_count: (lesson.attempts_count ?? 0) as number,
+    last_activity_at: (lesson.last_activity_at as string) ?? undefined,
+  }));
+  return {
+    student: {
+      student_id: (student.student_id ?? raw.student_id ?? '') as string,
+      display_name: (student.display_name ?? raw.display_name ?? '') as string,
+      avatar_url: (student.avatar_url as string) ?? undefined,
+    },
+    summary: {
+      progress_percent: (summary.progress_percent ?? raw.progress_percent ?? 0) as number,
+      xp_total: (summary.xp_total ?? raw.xp_total ?? 0) as number,
+      correctness_percent: (summary.correctness_percent ?? raw.correctness_percent ?? 0) as number,
+    },
+    lessons,
+  };
+}
+
+function buildDraftBody(data: import('./types').UpdateDraftInput): Record<string, unknown> {
+  return {
+    draft_version: data.draft_version,
+    title: data.title,
+    description: data.description,
+    age_min: data.age_min,
+    age_max: data.age_max,
+    cover_asset_id: data.cover_asset_id,
+    content: data.content_json,
+  };
+}
+
 export async function post<T>(path: string, body?: unknown, extra?: Record<string, string>): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -135,20 +224,11 @@ export const getChildren = async (): Promise<import('./types').LinkedChild[]> =>
 };
 export const createLinkInvite = async (): Promise<import('./types').LinkInvite> => {
   const raw = await post<Record<string, unknown>>('/parent/children/link-invites');
-  return {
-    invite_id: (raw.invite_id ?? '') as string,
-    status: 'active' as const,
-    invite_url: (raw.invite_url ?? raw.claim_url ?? '') as string,
-    created_at: (raw.created_at ?? new Date().toISOString()) as string,
-    expires_at: (raw.expires_at ?? '') as string,
-  };
+  return normalizeLinkInvite(raw);
 };
 export const getLinkInvites = async (): Promise<import('./types').LinkInvite[]> => {
   const items = await getList<Record<string, unknown>>('/parent/children/link-invites');
-  return items.map(i => ({
-    ...i,
-    invite_url: (i.invite_url ?? i.claim_url ?? '') as string,
-  })) as import('./types').LinkInvite[];
+  return items.map(normalizeLinkInvite);
 };
 export const revokeLinkInvite = (inviteId: string) => post<void>(`/parent/children/link-invites/${inviteId}/revoke`);
 export const getChildProgress = async (studentId: string): Promise<import('./types').ChildProgress> => {
@@ -199,23 +279,38 @@ export const getTeacherDraft = async (courseId: string): Promise<import('./types
     has_published_revision: !!(raw.has_published_revision ?? raw.last_published_revision_id),
   } as import('./types').CourseDraft;
 };
-export const updateTeacherDraft = (courseId: string, data: Partial<import('./types').CourseDraft> & { draft_version: number }) => {
-  const body: Record<string, unknown> = { ...data };
-  // Backend expects 'content' not 'content_json'
-  if (body.content_json && !body.content) {
-    body.content = body.content_json;
-    delete body.content_json;
-  }
-  return put<{ draft_version: number }>(`/teacher/courses/${courseId}/draft`, body);
-};
+export const updateTeacherDraft = (courseId: string, data: import('./types').UpdateDraftInput) =>
+  put<{ draft_version: number }>(`/teacher/courses/${courseId}/draft`, buildDraftBody(data));
 export const submitTeacherReview = (courseId: string) => post<void>(`/teacher/courses/${courseId}/submit-review`);
-export const getTeacherReviewStatus = (courseId: string) => get<import('./types').ReviewStatus>(`/teacher/courses/${courseId}/review-status`);
-export const createTeacherPreview = (courseId: string, lessonId: string) => post<import('./types').StepView>(`/teacher/courses/${courseId}/preview`, { lesson_id: lessonId });
-export const createTeacherAccessLink = (courseId: string) => post<import('./types').AccessLink>(`/teacher/courses/${courseId}/access-links`);
-export const getTeacherAccessLinks = (courseId: string) => getList<import('./types').AccessLink>(`/teacher/courses/${courseId}/access-links`);
+export const getTeacherReviewStatus = async (courseId: string): Promise<import('./types').ReviewStatus> => {
+  const raw = await get<Record<string, unknown>>(`/teacher/courses/${courseId}/review-status`);
+  const current = (raw.current as Record<string, unknown> | null) ?? null;
+  if (!current) {
+    return { status: 'none' };
+  }
+  return {
+    review_id: (current.review_id as string) ?? undefined,
+    status: ((current.status ?? 'none') as import('./types').ReviewStatus['status']),
+    review_comment: (current.review_comment as string) ?? undefined,
+    submitted_at: (current.submitted_at as string) ?? undefined,
+    resolved_at: (current.resolved_at as string) ?? undefined,
+  };
+};
+export const createTeacherPreview = async (courseId: string, lessonId: string): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/teacher/courses/${courseId}/preview`, { lesson_id: lessonId });
+  return normalizePreviewSession(raw);
+};
+export const createTeacherAccessLink = async (courseId: string): Promise<import('./types').AccessLink> => {
+  const raw = await post<Record<string, unknown>>(`/teacher/courses/${courseId}/access-links`, {});
+  return normalizeAccessLink(raw);
+};
+export const getTeacherAccessLinks = async (courseId: string): Promise<import('./types').AccessLink[]> => {
+  const items = await getList<Record<string, unknown>>(`/teacher/courses/${courseId}/access-links`);
+  return items.map(normalizeAccessLink);
+};
 export const revokeTeacherAccessLink = (linkId: string) => post<void>(`/teacher/access-links/${linkId}/revoke`);
 export const getTeacherStudents = async (courseId: string): Promise<import('./types').TeacherStudent[]> => {
-  const items = await getList<Record<string, unknown>>(`/teacher/courses/${courseId}/students`);
+  const items = await getList<Record<string, unknown>>(`/teacher/courses/${courseId}/students`, 'students');
   return items.map(s => ({
     student_id: (s.student_id ?? '') as string,
     display_name: (s.display_name ?? '') as string,
@@ -226,15 +321,32 @@ export const getTeacherStudents = async (courseId: string): Promise<import('./ty
     last_activity_at: (s.last_activity_at ?? '') as string,
   }));
 };
-export const getTeacherStudentDetail = (courseId: string, studentId: string) => get<import('./types').TeacherStudentDetail>(`/teacher/courses/${courseId}/students/${studentId}`);
+export const getTeacherStudentDetail = async (courseId: string, studentId: string): Promise<import('./types').TeacherStudentDetail> => {
+  const raw = await get<Record<string, unknown>>(`/teacher/courses/${courseId}/students/${studentId}`);
+  return normalizeTeacherStudentDetail(raw);
+};
 export const archiveTeacherCourse = (courseId: string) => post<void>(`/teacher/courses/${courseId}/archive`);
 export const getTeacherProfile = () => get<import('./types').TeacherProfile>('/teacher/profile');
 export const updateTeacherProfile = (data: { display_name: string; organization_name?: string }) => put<import('./types').TeacherProfile>('/teacher/profile', data);
 
 // Preview (shared teacher+admin)
-export const previewNext = (previewSessionId: string, stateVersion: number, expectedNodeId: string) => post<import('./types').StepView>(`/preview-sessions/${previewSessionId}/next`, { state_version: stateVersion, expected_node_id: expectedNodeId });
-export const previewAnswer = (previewSessionId: string, body: { node_id: string; answer: unknown; state_version: number }) =>
-  post<import('./types').AnswerOutcome>(`/preview-sessions/${previewSessionId}/answer`, body);
+export const getPreviewSession = async (previewSessionId: string): Promise<import('./types').PreviewSessionView> => {
+  const raw = await get<Record<string, unknown>>(`/preview-sessions/${previewSessionId}`);
+  return normalizePreviewSession(raw);
+};
+export const previewNext = async (previewSessionId: string, stateVersion: number, expectedNodeId: string): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/preview-sessions/${previewSessionId}/next`, { state_version: stateVersion, expected_node_id: expectedNodeId });
+  return normalizePreviewSession(raw);
+};
+export const previewAnswer = async (previewSessionId: string, body: { node_id: string; answer: unknown; state_version: number }): Promise<import('./types').PreviewAnswerView> => {
+  const raw = await post<Record<string, unknown>>(`/preview-sessions/${previewSessionId}/answer`, body);
+  return {
+    preview: true,
+    verdict: (raw.verdict ?? 'incorrect') as import('./types').PreviewAnswerView['verdict'],
+    feedback_text: (raw.feedback_text ?? '') as string,
+    next_step: raw.next_step ? normalizePreviewStep(raw.next_step as Record<string, unknown>) : null,
+  };
+};
 
 // Admin
 export const getAdminCourses = async (): Promise<import('./types').AdminCourse[]> => {
@@ -254,16 +366,22 @@ export const getAdminDraft = async (courseId: string): Promise<import('./types')
   const content = (raw.content_json ?? raw.content ?? { modules: [] }) as import('./types').CourseContent;
   return { ...raw, content_json: content } as import('./types').CourseDraft;
 };
-export const updateAdminDraft = (courseId: string, data: Partial<import('./types').CourseDraft> & { draft_version: number }) => {
-  const body: Record<string, unknown> = { ...data };
-  if (body.content_json && !body.content) {
-    body.content = body.content_json;
-    delete body.content_json;
-  }
-  return put<{ draft_version: number }>(`/admin/courses/${courseId}/draft`, body);
+export const getModerationReviewDraft = async (reviewId: string): Promise<import('./types').CourseDraft> => {
+  const raw = await get<Record<string, unknown>>(`/admin/moderation/reviews/${reviewId}/draft`);
+  const content = (raw.content_json ?? raw.content ?? { modules: [] }) as import('./types').CourseContent;
+  return { ...raw, content_json: content } as import('./types').CourseDraft;
 };
+export const updateAdminDraft = (courseId: string, data: import('./types').UpdateDraftInput) =>
+  put<{ draft_version: number }>(`/admin/courses/${courseId}/draft`, buildDraftBody(data));
 export const publishAdminCourse = (courseId: string) => post<void>(`/admin/courses/${courseId}/publish`);
-export const createAdminPreview = (courseId: string, lessonId: string) => post<import('./types').StepView>(`/admin/courses/${courseId}/preview`, { lesson_id: lessonId });
+export const createAdminPreview = async (courseId: string, lessonId: string): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/admin/courses/${courseId}/preview`, { lesson_id: lessonId });
+  return normalizePreviewSession(raw);
+};
+export const createModerationPreview = async (reviewId: string, lessonId: string): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/admin/moderation/reviews/${reviewId}/preview`, { lesson_id: lessonId });
+  return normalizePreviewSession(raw);
+};
 export const createAdminAccessGrant = (courseId: string, studentId: string) => post<void>(`/admin/courses/${courseId}/access-grants`, { student_id: studentId });
 export const getAdminUsers = async (params?: { role?: string }): Promise<import('./types').AdminUser[]> => {
   const items = await getList<Record<string, unknown>>(`/admin/users${params?.role ? `?role=${params.role}` : ''}`);
@@ -271,6 +389,7 @@ export const getAdminUsers = async (params?: { role?: string }): Promise<import(
     ...u,
     created_at: (u.created_at ?? u.registered_at ?? '') as string,
     status: (u.status ?? 'active') as 'active' | 'blocked',
+    email: (u.email as string) ?? undefined,
   })) as import('./types').AdminUser[];
 };
 export const getAdminUser = (userId: string) => get<import('./types').AdminUser>(`/admin/users/${userId}`);
@@ -329,7 +448,7 @@ export const getOrders = async (): Promise<import('./types').CommercialOrder[]> 
     };
   });
 };
-export const createManualOrder = (data: Record<string, unknown>) => post<{ order_id: string }>('/admin/commerce/orders/manual', data);
+export const createManualOrder = (data: import('./types').ManualOrderInput) => post<{ order_id: string }>('/admin/commerce/orders/manual', data);
 export const confirmPayment = (orderId: string, data: Record<string, unknown>, idempotencyKey: string) =>
   post<void>(`/admin/commerce/orders/${orderId}/payments/manual-confirm`, data, { 'Idempotency-Key': idempotencyKey });
 export const grantEntitlement = (data: Record<string, unknown>) => post<void>('/admin/commerce/entitlements/grants', data);

@@ -384,7 +384,9 @@ func (s *Service) ListUsers(ctx context.Context, role string) (map[string]any, e
 	rows, err := s.db.Query(ctx, `
 		select a.id::text,
 		       a.role,
+		       a.status,
 		       coalesce(sp.display_name, pp.display_name, tp.display_name, ap.display_name, ''),
+		       ei.email,
 		       a.created_at::text,
 		       coalesce(sgs.xp_total, 0),
 		       (
@@ -393,6 +395,13 @@ func (s *Service) ListUsers(ctx context.Context, role string) (map[string]any, e
 		           where cp.student_id = a.id
 		       )
 		from accounts a
+		left join lateral (
+		    select email
+		    from external_identities
+		    where account_id = a.id and email is not null and trim(email) <> ''
+		    order by created_at desc
+		    limit 1
+		) ei on true
 		left join student_profiles sp on sp.account_id = a.id
 		left join parent_profiles pp on pp.account_id = a.id
 		left join teacher_profiles tp on tp.account_id = a.id
@@ -407,17 +416,20 @@ func (s *Service) ListUsers(ctx context.Context, role string) (map[string]any, e
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var accountID, roleValue, displayName, registeredAt string
+		var accountID, roleValue, statusValue, displayName, createdAt string
+		var email *string
 		var xpTotal int64
 		var lastActivityAt *string
-		if err := rows.Scan(&accountID, &roleValue, &displayName, &registeredAt, &xpTotal, &lastActivityAt); err != nil {
+		if err := rows.Scan(&accountID, &roleValue, &statusValue, &displayName, &email, &createdAt, &xpTotal, &lastActivityAt); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
 			"account_id":       accountID,
 			"role":             roleValue,
+			"status":           statusValue,
 			"display_name":     displayName,
-			"registered_at":    registeredAt,
+			"email":            email,
+			"created_at":       createdAt,
 			"xp_total":         xpTotal,
 			"last_activity_at": lastActivityAt,
 		})

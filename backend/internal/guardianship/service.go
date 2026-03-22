@@ -2,6 +2,8 @@ package guardianship
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -32,12 +34,19 @@ func NewService(db *pgxpool.Pool, cfg platformconfig.Config) *Service {
 type CreateInviteView struct {
 	InviteID  string `json:"invite_id"`
 	ClaimURL  string `json:"claim_url"`
+	InviteURL string `json:"invite_url"`
+	URLStatus string `json:"url_status"`
+	CreatedAt string `json:"created_at"`
 	ExpiresAt string `json:"expires_at"`
 }
 
 type InviteListItem struct {
 	InviteID  string  `json:"invite_id"`
 	Status    string  `json:"status"`
+	InviteURL *string `json:"invite_url,omitempty"`
+	ClaimURL  *string `json:"claim_url,omitempty"`
+	URLStatus string  `json:"url_status"`
+	CreatedAt string  `json:"created_at"`
 	ExpiresAt string  `json:"expires_at"`
 	UsedAt    *string `json:"used_at"`
 }
@@ -64,6 +73,8 @@ type ChildSummaryView struct {
 	AvatarURL         *string `json:"avatar_url"`
 	XPTotal           int64   `json:"xp_total"`
 	CurrentStreakDays int     `json:"current_streak_days"`
+	CoursesInProgress int     `json:"courses_in_progress"`
+	CoursesCompleted  int     `json:"courses_completed"`
 	CompletedLessons  int     `json:"completed_lessons"`
 	LastActivityAt    *string `json:"last_activity_at"`
 }
@@ -88,26 +99,35 @@ func (s *Service) CreateInvite(ctx context.Context, parentID string) (CreateInvi
 	if err != nil {
 		return CreateInviteView{}, err
 	}
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	var inviteID string
-	err = s.db.QueryRow(ctx, `
-		insert into guardian_link_invites(created_by_parent_id, token_hash, status, expires_at)
-		values ($1, $2, 'active', $3)
-		returning id::text
-	`, parentID, hashToken(rawToken), expiresAt).Scan(&inviteID)
+	tokenEncrypted, err := encryptToken(rawToken, s.config.SigningSecret)
 	if err != nil {
 		return CreateInviteView{}, err
 	}
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	var inviteID string
+	var createdAt time.Time
+	err = s.db.QueryRow(ctx, `
+		insert into guardian_link_invites(created_by_parent_id, token_hash, token_encrypted, status, expires_at)
+		values ($1, $2, $3, 'active', $4)
+		returning id::text, created_at
+	`, parentID, hashToken(rawToken), tokenEncrypted, expiresAt).Scan(&inviteID, &createdAt)
+	if err != nil {
+		return CreateInviteView{}, err
+	}
+	claimURL := strings.TrimRight(s.config.BaseURL, "/") + "/claim/guardian-link#token=" + rawToken
 	return CreateInviteView{
 		InviteID:  inviteID,
-		ClaimURL:  strings.TrimRight(s.config.BaseURL, "/") + "/claim/guardian-link#token=" + rawToken,
+		ClaimURL:  claimURL,
+		InviteURL: claimURL,
+		URLStatus: "available",
+		CreatedAt: createdAt.UTC().Format(time.RFC3339),
 		ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 	}, nil
 }
 
 func (s *Service) ListInvites(ctx context.Context, parentID string) (InviteListView, error) {
 	rows, err := s.db.Query(ctx, `
-		select id::text, status, expires_at::text, used_at::text
+		select id::text, status, token_encrypted, created_at::text, expires_at::text, used_at::text
 		from guardian_link_invites
 		where created_by_parent_id = $1
 		order by created_at desc
@@ -120,8 +140,23 @@ func (s *Service) ListInvites(ctx context.Context, parentID string) (InviteListV
 	items := make([]InviteListItem, 0)
 	for rows.Next() {
 		var item InviteListItem
-		if err := rows.Scan(&item.InviteID, &item.Status, &item.ExpiresAt, &item.UsedAt); err != nil {
+		var tokenEncrypted *string
+		if err := rows.Scan(&item.InviteID, &item.Status, &tokenEncrypted, &item.CreatedAt, &item.ExpiresAt, &item.UsedAt); err != nil {
 			return InviteListView{}, err
+		}
+		if tokenEncrypted != nil && strings.TrimSpace(*tokenEncrypted) != "" {
+			rawToken, err := decryptToken(*tokenEncrypted, s.config.SigningSecret)
+			if err != nil {
+				item.URLStatus = "legacy_unavailable"
+				items = append(items, item)
+				continue
+			}
+			claimURL := strings.TrimRight(s.config.BaseURL, "/") + "/claim/guardian-link#token=" + rawToken
+			item.InviteURL = &claimURL
+			item.ClaimURL = &claimURL
+			item.URLStatus = "available"
+		} else {
+			item.URLStatus = "legacy_unavailable"
 		}
 		items = append(items, item)
 	}
@@ -291,6 +326,8 @@ func (s *Service) ListChildren(ctx context.Context, parentID string) (ChildrenLi
 		       case when a.id is null then null else '/assets/' || a.id::text end as avatar_url,
 		       coalesce(sgs.xp_total, 0),
 		       coalesce(sss.current_streak_days, 0),
+		       coalesce((select count(*) from course_progress cp where cp.student_id = sp.account_id and cp.status = 'in_progress'), 0),
+		       coalesce((select count(*) from course_progress cp where cp.student_id = sp.account_id and cp.status = 'completed'), 0),
 		       coalesce((select count(*) from lesson_progress lp where lp.student_id = sp.account_id and lp.status = 'completed'), 0),
 		       (
 		           select max(cp.last_activity_at)::text
@@ -319,6 +356,8 @@ func (s *Service) ListChildren(ctx context.Context, parentID string) (ChildrenLi
 			&item.AvatarURL,
 			&item.XPTotal,
 			&item.CurrentStreakDays,
+			&item.CoursesInProgress,
+			&item.CoursesCompleted,
 			&item.CompletedLessons,
 			&item.LastActivityAt,
 		); err != nil {
@@ -380,6 +419,13 @@ func (s *Service) ChildProgress(ctx context.Context, parentID string, studentID 
 	rows, err := s.db.Query(ctx, `
 		select cp.course_id::text,
 		       cr.title,
+		       cp.status,
+		       completed.completed_count,
+		       totals.total_count,
+		       cp.correct_answers,
+		       cp.partial_answers,
+		       cp.incorrect_answers,
+		       cp.last_activity_at::text,
 		       case
 		           when totals.total_count = 0 then 0
 		           else floor((completed.completed_count::decimal / totals.total_count::decimal) * 100)::int
@@ -404,16 +450,23 @@ func (s *Service) ChildProgress(ctx context.Context, parentID string, studentID 
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var courseID, title string
-		var percent int
-		if err := rows.Scan(&courseID, &title, &percent); err != nil {
+		var courseID, title, status, lastActivityAt string
+		var completedLessons, totalLessons, correctAnswers, partialAnswers, incorrectAnswers, percent int
+		if err := rows.Scan(&courseID, &title, &status, &completedLessons, &totalLessons, &correctAnswers, &partialAnswers, &incorrectAnswers, &lastActivityAt, &percent); err != nil {
 			return ChildProgressView{}, err
 		}
 		view.Courses = append(view.Courses, map[string]any{
-			"course_id":        courseID,
-			"title":            title,
-			"progress_percent": percent,
-			"lessons":          []any{},
+			"course_id":         courseID,
+			"title":             title,
+			"status":            status,
+			"completed_lessons": completedLessons,
+			"total_lessons":     totalLessons,
+			"correct_answers":   correctAnswers,
+			"partial_answers":   partialAnswers,
+			"incorrect_answers": incorrectAnswers,
+			"last_activity_at":  lastActivityAt,
+			"progress_percent":  percent,
+			"lessons":           []any{},
 		})
 	}
 	return view, rows.Err()
@@ -440,6 +493,50 @@ func randomToken(size int) (string, error) {
 func hashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+func encryptToken(raw string, secret string) (string, error) {
+	key := sha256.Sum256([]byte(secret))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	cipherText := gcm.Seal(nil, nonce, []byte(raw), nil)
+	return base64.RawURLEncoding.EncodeToString(append(nonce, cipherText...)), nil
+}
+
+func decryptToken(value string, secret string) (string, error) {
+	key := sha256.Sum256([]byte(secret))
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(raw) < gcm.NonceSize() {
+		return "", fmt.Errorf("invalid_encrypted_token")
+	}
+	nonce := raw[:gcm.NonceSize()]
+	cipherText := raw[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, cipherText, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 var (

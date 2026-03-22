@@ -220,16 +220,28 @@ func (s *Service) ListCourses(ctx context.Context, role string, accountID string
 		rows, err = s.db.Query(ctx, `
 			select c.id::text,
 			       d.title,
+			       c.owner_kind,
 			       c.course_kind,
+			       c.status,
 			       (
 			           select cr.id::text from course_revisions cr
 			           where cr.course_id = c.id and cr.is_current = true
 			           limit 1
 			       ) as current_revision_id,
-			       d.updated_at::text
+			       coalesce((
+			           select count(*)
+			           from jsonb_array_elements(coalesce(d.content_json->'modules', '[]'::jsonb)) mod,
+			               jsonb_array_elements(coalesce(mod->'lessons', '[]'::jsonb)) lesson
+			       ), 0) as lesson_count,
+			       (
+			           select count(*)
+			           from course_access_grants ag
+			           where ag.course_id = c.id and ag.archived_at is null
+			       ) as student_count,
+			       c.created_at::text
 			from courses c
 			join course_drafts d on d.course_id = c.id
-			where c.owner_kind = 'platform' and c.deleted_at is null
+			where c.deleted_at is null
 			order by d.updated_at desc
 		`)
 	}
@@ -258,18 +270,22 @@ func (s *Service) ListCourses(ctx context.Context, role string, accountID string
 				"updated_at":            updatedAt,
 			})
 		} else {
-			var courseID, title, courseKind, updatedAt string
+			var courseID, title, ownerKind, courseKind, status, createdAt string
 			var currentRevisionID *string
-			if err := rows.Scan(&courseID, &title, &courseKind, &currentRevisionID, &updatedAt); err != nil {
+			var lessonCount, studentCount int
+			if err := rows.Scan(&courseID, &title, &ownerKind, &courseKind, &status, &currentRevisionID, &lessonCount, &studentCount, &createdAt); err != nil {
 				return CourseListView{}, err
 			}
 			items = append(items, map[string]any{
 				"course_id":           courseID,
 				"title":               title,
 				"course_kind":         courseKind,
-				"owner_kind":          "platform",
+				"owner_kind":          ownerKind,
+				"status":              status,
 				"current_revision_id": currentRevisionID,
-				"updated_at":          updatedAt,
+				"lesson_count":        lessonCount,
+				"student_count":       studentCount,
+				"created_at":          createdAt,
 			})
 		}
 	}
@@ -278,7 +294,17 @@ func (s *Service) ListCourses(ctx context.Context, role string, accountID string
 
 func (s *Service) PromoCourses(ctx context.Context) (map[string]any, error) {
 	rows, err := s.db.Query(ctx, `
-		select c.id::text, cr.title, cr.description, null::text as cover_url
+		select c.id::text,
+		       cr.title,
+		       cr.description,
+		       null::text as cover_url,
+		       cr.age_min,
+		       cr.age_max,
+		       coalesce((
+		           select count(*)
+		           from course_revision_lessons crl
+		           where crl.course_revision_id = cr.id
+		       ), 0) as lesson_count
 		from courses c
 		join course_revisions cr on cr.course_id = c.id and cr.is_current = true
 		where c.owner_kind = 'platform' and c.deleted_at is null
@@ -293,7 +319,9 @@ func (s *Service) PromoCourses(ctx context.Context) (map[string]any, error) {
 	for rows.Next() {
 		var courseID, title, description string
 		var coverURL *string
-		if err := rows.Scan(&courseID, &title, &description, &coverURL); err != nil {
+		var ageMin, ageMax *int
+		var lessonCount int
+		if err := rows.Scan(&courseID, &title, &description, &coverURL, &ageMin, &ageMax, &lessonCount); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
@@ -301,6 +329,9 @@ func (s *Service) PromoCourses(ctx context.Context) (map[string]any, error) {
 			"title":       title,
 			"description": description,
 			"cover_url":   coverURL,
+			"age_min":     ageMin,
+			"age_max":     ageMax,
+			"lesson_count": lessonCount,
 			"badge":       "Популярный",
 		})
 	}
@@ -558,6 +589,26 @@ func (s *Service) StartPreview(ctx context.Context, role string, actorID string,
 	if err != nil {
 		return PreviewStepEnvelope{}, err
 	}
+	return s.startPreviewFromDraft(role, actorID, draft, lessonID)
+}
+
+func (s *Service) ModerationDraft(ctx context.Context, reviewID string) (DraftView, error) {
+	draft, _, err := s.loadModerationDraft(ctx, reviewID)
+	if err != nil {
+		return DraftView{}, err
+	}
+	return draft, nil
+}
+
+func (s *Service) StartModerationPreview(ctx context.Context, adminID string, reviewID string, lessonID string) (PreviewStepEnvelope, error) {
+	draft, _, err := s.loadModerationDraft(ctx, reviewID)
+	if err != nil {
+		return PreviewStepEnvelope{}, err
+	}
+	return s.startPreviewFromDraft("admin", adminID, draft, lessonID)
+}
+
+func (s *Service) startPreviewFromDraft(role string, actorID string, draft DraftView, lessonID string) (PreviewStepEnvelope, error) {
 	if !draft.Validation.IsValid {
 		return PreviewStepEnvelope{}, ErrDraftValidationFailed
 	}
@@ -570,33 +621,100 @@ func (s *Service) StartPreview(ctx context.Context, role string, actorID string,
 	sessionID := uuid.NewString()
 	s.mu.Lock()
 	s.evictPreviewsLocked(time.Now())
-	s.previews[sessionID] = &previewSession{
+	session := &previewSession{
 		ID:           sessionID,
 		OwnerRole:    role,
 		OwnerID:      actorID,
-		CourseID:     courseID,
+		CourseID:     draft.CourseID,
 		LessonID:     lessonID,
 		Graph:        graph,
 		CurrentID:    graph.StartNodeID,
 		StateVersion: 1,
 		LastTouched:  time.Now(),
 	}
+	s.previews[sessionID] = session
 	s.mu.Unlock()
-	return PreviewStepEnvelope{
-		Preview:          true,
-		PreviewSessionID: sessionID,
-		Step:             buildStepView(sessionID, courseID, lessonID, 1, graph, graph.StartNodeID, startNode),
-	}, nil
+	_ = startNode
+	return buildPreviewEnvelope(session), nil
 }
 
-func (s *Service) PreviewNext(_ context.Context, role string, actorID string, previewSessionID string, stateVersion int64) (PreviewStepEnvelope, error) {
+func (s *Service) loadModerationDraft(ctx context.Context, reviewID string) (DraftView, *string, error) {
+	var draft DraftView
+	var ownerKind string
+	var ownerAccountID *string
+	if err := s.db.QueryRow(ctx, `
+		select c.owner_kind,
+		       c.owner_account_id::text,
+		       d.course_id::text,
+		       d.id::text,
+		       d.draft_version,
+		       d.workflow_status,
+		       d.title,
+		       d.description,
+		       d.age_min,
+		       d.age_max,
+		       d.cover_asset_id::text,
+		       d.content_json::text,
+		       d.last_published_revision_id::text
+		from course_reviews r
+		join course_drafts d on d.id = r.course_draft_id
+		join courses c on c.id = d.course_id
+		where r.id = $1 and r.status = 'pending'
+	`, reviewID).Scan(
+		&ownerKind,
+		&ownerAccountID,
+		&draft.CourseID,
+		&draft.DraftID,
+		&draft.DraftVersion,
+		&draft.WorkflowStatus,
+		&draft.Title,
+		&draft.Description,
+		&draft.AgeMin,
+		&draft.AgeMax,
+		&draft.CoverAssetID,
+		&draft.Content,
+		&draft.LastPublishedRevisionID,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return DraftView{}, nil, ErrReviewNotFound
+		}
+		return DraftView{}, nil, err
+	}
+
+	var assetOwnerID *string
+	if ownerKind == "teacher" {
+		assetOwnerID = ownerAccountID
+	}
+	validation, err := s.ValidateDraft(ctx, assetOwnerID, draft.CoverAssetID, draft.Content)
+	if err != nil {
+		return DraftView{}, nil, err
+	}
+	draft.Validation = validation
+	return draft, assetOwnerID, nil
+}
+
+func (s *Service) PreviewSession(_ context.Context, role string, actorID string, previewSessionID string) (PreviewStepEnvelope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, err := s.loadPreviewLocked(previewSessionID, role, actorID, time.Now())
 	if err != nil {
 		return PreviewStepEnvelope{}, err
 	}
-	if session.StateVersion != stateVersion {
+	return buildPreviewEnvelope(session), nil
+}
+
+func (s *Service) PreviewNext(_ context.Context, role string, actorID string, previewSessionID string, stateVersion int64, expectedNodeID string) (PreviewStepEnvelope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, err := s.loadPreviewLocked(previewSessionID, role, actorID, time.Now())
+	if err != nil {
+		return PreviewStepEnvelope{}, err
+	}
+	if session.StateVersion != stateVersion || session.CurrentID != expectedNodeID {
+		priorNode := session.Graph.NodeMap[expectedNodeID]
+		if session.StateVersion == stateVersion+1 && priorNode.Kind == "story" && priorNode.NextNodeID != "" && session.CurrentID == priorNode.NextNodeID {
+			return buildPreviewEnvelope(session), nil
+		}
 		return PreviewStepEnvelope{}, ErrPreviewStateConflict
 	}
 	node := session.Graph.NodeMap[session.CurrentID]
@@ -606,11 +724,7 @@ func (s *Service) PreviewNext(_ context.Context, role string, actorID string, pr
 	session.StateVersion++
 	session.CurrentID = node.NextNodeID
 	session.LastTouched = time.Now()
-	nextNode := session.Graph.NodeMap[session.CurrentID]
-	return PreviewStepEnvelope{
-		Preview: true,
-		Step:    buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, nextNode),
-	}, nil
+	return buildPreviewEnvelope(session), nil
 }
 
 func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string, previewSessionID string, stateVersion int64, nodeID string, answer map[string]any) (PreviewAnswerOutcome, error) {

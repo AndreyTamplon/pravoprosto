@@ -31,7 +31,7 @@ export default function StudentDetail() {
   if (error) return <div className={s.error}>{error}</div>;
   if (!data) return null;
 
-  const initial = data.display_name.charAt(0).toUpperCase();
+  const initial = data.student.display_name.charAt(0).toUpperCase();
 
   return (
     <div className={s.page}>
@@ -45,7 +45,12 @@ export default function StudentDetail() {
 
       <div className={s.studentHeader}>
         <div className={s.avatar}>{initial}</div>
-        <h1 className={s.studentName}>{data.display_name}</h1>
+        <div>
+          <h1 className={s.studentName}>{data.student.display_name}</h1>
+          <div style={{ color: 'var(--dark-light)', marginTop: 4 }}>
+            Прогресс: {data.summary.progress_percent}% · XP: {data.summary.xp_total} · Точность: {data.summary.correctness_percent}%
+          </div>
+        </div>
       </div>
 
       <h2 className={s.sectionTitle}>Этапы</h2>

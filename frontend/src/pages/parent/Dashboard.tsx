@@ -135,13 +135,19 @@ export default function Dashboard() {
                 <div key={inv.invite_id} className={s.inviteRow}>
                   <div className={s.inviteInfo}>
                     <Badge color="teal">Активно</Badge>
-                    <span className={s.inviteUrl}>{inv.invite_url}</span>
+                    <span className={s.inviteUrl}>
+                      {inv.invite_url ?? 'Ссылка недоступна для старого приглашения'}
+                    </span>
                     <span>до {formatDate(inv.expires_at)}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <Button size="sm" variant="outline" onClick={() => handleCopy(inv.invite_url)}>
-                      Копировать
-                    </Button>
+                    {inv.invite_url ? (
+                      <Button size="sm" variant="outline" onClick={() => handleCopy(inv.invite_url!)}>
+                        Копировать
+                      </Button>
+                    ) : (
+                      <Badge color="gray">Создайте новое приглашение</Badge>
+                    )}
                     <Button
                       size="sm"
                       variant="danger"
@@ -175,7 +181,7 @@ export default function Dashboard() {
                 <span className={s.inviteLinkText}>{newInvite.invite_url}</span>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <Button onClick={() => handleCopy(newInvite.invite_url)}>
+                <Button onClick={() => handleCopy(newInvite.invite_url!)}>
                   Копировать ссылку
                 </Button>
                 {copied && <span className={s.copied}>Скопировано!</span>}

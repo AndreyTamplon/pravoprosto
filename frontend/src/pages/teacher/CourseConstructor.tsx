@@ -11,6 +11,7 @@ import {
   revokeTeacherAccessLink,
   archiveTeacherCourse,
 } from '../../api/client';
+import { graphToBackendFormat, isBackendLessonGraph } from '../../api/types';
 import type { CourseDraft, ContentModule, ContentLesson, ReviewStatus, AccessLink } from '../../api/types';
 import { Button, ComicPanel, Badge, Spinner, Modal, Input, Textarea } from '../../components/ui';
 import s from './CourseConstructor.module.css';
@@ -20,10 +21,26 @@ function generateId(): string {
 }
 
 const emptyGraph = () => ({
-  startNodeId: '',
-  nodes: [],
-  edges: [],
+  startNodeId: 'start',
+  nodes: [
+    { id: 'start', type: 'story' as const, data: { text: '' } },
+    { id: 'end', type: 'terminal' as const, data: { text: 'Миссия завершена!' } },
+  ],
+  edges: [{ from: 'start', to: 'end' }],
 });
+
+function serializeModules(modules: ContentModule[]): ContentModule[] {
+  return modules.map(module => ({
+    ...module,
+    lessons: module.lessons.map(lesson => {
+      const rawGraph = lesson.graph as unknown as Record<string, unknown>;
+      return {
+        ...lesson,
+        graph: (isBackendLessonGraph(rawGraph) ? rawGraph : graphToBackendFormat(lesson.graph)) as unknown as ContentLesson['graph'],
+      };
+    }),
+  }));
+}
 
 const workflowBadge: Record<string, { label: string; color: 'yellow' | 'blue' | 'red' | 'lime' | 'gray' }> = {
   editing: { label: 'Редактирование', color: 'yellow' },
@@ -84,42 +101,47 @@ export default function CourseConstructor() {
     }
   }, [draft]);
 
+  const saveCurrentDraft = useCallback(async (showSavedState = false): Promise<number> => {
+    if (!courseId) {
+      throw new Error('Курс не найден');
+    }
+
+    const res = await updateTeacherDraft(courseId, {
+      draft_version: draftVersion,
+      title,
+      description,
+      age_min: ageMin === '' ? undefined : ageMin,
+      age_max: ageMax === '' ? undefined : ageMax,
+      cover_asset_id: draft?.cover_asset_id,
+      content_json: { modules: serializeModules(modules) },
+    });
+
+    setDraftVersion(res.draft_version);
+    if (showSavedState) {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    }
+    return res.draft_version;
+  }, [ageMax, ageMin, courseId, description, draft?.cover_asset_id, draftVersion, modules, title]);
+
   const handleSave = useCallback(async () => {
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      const res = await updateTeacherDraft(courseId!, {
-        draft_version: draftVersion,
-        title,
-        description,
-        age_min: ageMin === '' ? undefined : ageMin,
-        age_max: ageMax === '' ? undefined : ageMax,
-        content_json: { modules },
-      });
-      setDraftVersion(res.draft_version);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      await saveCurrentDraft(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Ошибка сохранения');
     } finally {
       setSaving(false);
     }
-  }, [courseId, draftVersion, title, description, ageMin, ageMax, modules]);
+  }, [saveCurrentDraft]);
 
   const doSubmit = useCallback(async () => {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await updateTeacherDraft(courseId!, {
-        draft_version: draftVersion,
-        title,
-        description,
-        age_min: ageMin === '' ? undefined : ageMin,
-        age_max: ageMax === '' ? undefined : ageMax,
-        content_json: { modules },
-      });
-      setDraftVersion(res.draft_version);
+      await saveCurrentDraft();
       await submitTeacherReview(courseId!);
       reload();
       reloadReview();
@@ -128,7 +150,7 @@ export default function CourseConstructor() {
     } finally {
       setSubmitting(false);
     }
-  }, [courseId, draftVersion, title, description, ageMin, ageMax, modules, reload, reloadReview]);
+  }, [courseId, reload, reloadReview, saveCurrentDraft]);
 
   const handleSubmit = useCallback(() => {
     setConfirmAction({
@@ -265,6 +287,27 @@ export default function CourseConstructor() {
   const ws = workflowBadge[draft.workflow_status] ?? workflowBadge.editing;
   const isEditable = draft.workflow_status === 'editing' || draft.workflow_status === 'changes_requested';
   const activeLinks = accessLinks?.filter(l => l.status === 'active') ?? [];
+
+  const handleEditLesson = async (lessonId: string) => {
+    if (!courseId) return;
+
+    setError(null);
+    if (!isEditable) {
+      navigate(`/teacher/courses/${courseId}/lessons/${lessonId}`);
+      return;
+    }
+
+    setSaving(true);
+    setSaved(false);
+    try {
+      await saveCurrentDraft();
+      navigate(`/teacher/courses/${courseId}/lessons/${lessonId}`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className={s.page}>
@@ -422,9 +465,7 @@ export default function CourseConstructor() {
                       <div key={lesson.id} className={s.lessonCard}>
                         <span
                           className={s.lessonTitle}
-                          onClick={() =>
-                            navigate(`/teacher/courses/${courseId}/lessons/${lesson.id}`)
-                          }
+                          onClick={() => { void handleEditLesson(lesson.id); }}
                         >
                           {lessonIdx + 1}. {lesson.title}
                         </span>
@@ -461,9 +502,7 @@ export default function CourseConstructor() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() =>
-                              navigate(`/teacher/courses/${courseId}/lessons/${lesson.id}`)
-                            }
+                            onClick={() => { void handleEditLesson(lesson.id); }}
                           >
                             Редактировать
                           </Button>
@@ -542,11 +581,13 @@ export default function CourseConstructor() {
             <div className={s.linkList}>
               {activeLinks.map(link => (
                 <div key={link.link_id} className={s.linkRow}>
-                  <span className={s.linkUrl}>{link.invite_url}</span>
+                  <span className={s.linkUrl}>{link.invite_url ?? 'Ссылка недоступна для старого приглашения'}</span>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <Button size="sm" variant="ghost" onClick={() => handleCopy(link.invite_url)}>
-                      Копировать
-                    </Button>
+                    {link.invite_url ? (
+                      <Button size="sm" variant="ghost" onClick={() => handleCopy(link.invite_url!)}>
+                        Копировать
+                      </Button>
+                    ) : null}
                     <Button size="sm" variant="danger" onClick={() => handleRevokeLink(link.link_id)}>
                       Отозвать
                     </Button>

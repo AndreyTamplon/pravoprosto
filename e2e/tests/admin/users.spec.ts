@@ -55,15 +55,16 @@ test.describe('Admin: User management', () => {
     await page.getByRole('cell', { name: 'Мария Ивановна' }).click();
 
     // Modal should open with title "Пользователь"
-    const modal = page.getByRole('dialog').or(page.locator('[class*="modal"]'));
+    const modal = page.getByRole('dialog');
+    await expect(modal).toBeVisible();
     await expect(modal.getByText('Пользователь')).toBeVisible();
 
     // Detail fields
     await expect(modal.getByText('Мария Ивановна')).toBeVisible();
 
     // Block/unblock action button
-    const blockBtn = page.getByRole('button', { name: 'Заблокировать' });
-    const unblockBtn = page.getByRole('button', { name: 'Разблокировать' });
-    await expect(blockBtn.or(unblockBtn)).toBeVisible();
+    await expect(
+      modal.getByRole('button', { name: /Заблокировать|Разблокировать/ }),
+    ).toHaveCount(1);
   });
 });

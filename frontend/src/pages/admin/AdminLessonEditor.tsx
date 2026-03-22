@@ -4,7 +4,7 @@ import { useApi } from '../../hooks/useApi';
 import { getAdminDraft, updateAdminDraft, createAdminPreview } from '../../api/client';
 import { Button, Badge, Spinner, EmptyState, Input, Textarea } from '../../components/ui';
 import type { CourseDraft, GraphNode, GraphEdge, ContentModule, ContentLesson, LessonGraph } from '../../api/types';
-import { graphToBackendFormat, graphFromBackendFormat } from '../../api/types';
+import { graphToBackendFormat, graphFromBackendFormat, isBackendLessonGraph } from '../../api/types';
 import styles from './AdminLessonEditor.module.css';
 
 type NodeType = 'story' | 'single_choice' | 'free_text' | 'terminal';
@@ -23,6 +23,24 @@ const NODE_LABELS: Record<NodeType, string> = {
   terminal: 'Конец',
 };
 
+function isPlaceholderGraph(graph: LessonGraph): boolean {
+  if (graph.startNodeId !== 'start' || graph.nodes.length !== 2 || graph.edges.length !== 1) {
+    return false;
+  }
+
+  const storyNode = graph.nodes.find(node => node.id === 'start' && node.type === 'story');
+  const endNode = graph.nodes.find(node => node.id === 'end' && node.type === 'terminal');
+  const edge = graph.edges[0];
+
+  return Boolean(
+    storyNode
+      && endNode
+      && edge?.from === 'start'
+      && edge?.to === 'end'
+      && ((storyNode.data.text as string | undefined) ?? '') === '',
+  );
+}
+
 function generateId(): string {
   return crypto.randomUUID().slice(0, 8);
 }
@@ -39,6 +57,7 @@ export default function AdminLessonEditor() {
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [startNodeId, setStartNodeId] = useState('');
   const [lessonTitle, setLessonTitle] = useState('');
+  const [draftVersion, setDraftVersion] = useState(0);
   const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -52,22 +71,33 @@ export default function AdminLessonEditor() {
   // Initialize from draft
   useEffect(() => {
     if (draft && !initialized) {
+      setDraftVersion(draft.draft_version);
       for (const mod of draft.content_json?.modules ?? []) {
         const lesson = mod.lessons.find((l: ContentLesson) => l.id === lessonId);
         if (lesson) {
           // Detect backend format (nodes have 'kind' not 'type') and convert
           const rawGraph = lesson.graph as unknown as Record<string, unknown>;
-          const rawNodes = (rawGraph?.nodes as Array<Record<string, unknown>>) ?? [];
-          const isBackendFormat = rawNodes.length > 0 && rawNodes[0].kind;
-          if (isBackendFormat) {
+          if (isBackendLessonGraph(rawGraph)) {
             const converted = graphFromBackendFormat(rawGraph);
-            setNodes(converted.nodes);
-            setEdges(converted.edges);
-            setStartNodeId(converted.startNodeId);
+            if (isPlaceholderGraph(converted)) {
+              setNodes([]);
+              setEdges([]);
+              setStartNodeId('');
+            } else {
+              setNodes(converted.nodes);
+              setEdges(converted.edges);
+              setStartNodeId(converted.startNodeId);
+            }
           } else {
-            setNodes(lesson.graph.nodes);
-            setEdges(lesson.graph.edges);
-            setStartNodeId(lesson.graph.startNodeId);
+            if (isPlaceholderGraph(lesson.graph)) {
+              setNodes([]);
+              setEdges([]);
+              setStartNodeId('');
+            } else {
+              setNodes(lesson.graph.nodes);
+              setEdges(lesson.graph.edges);
+              setStartNodeId(lesson.graph.startNodeId);
+            }
           }
           setLessonTitle(lesson.title);
           break;
@@ -77,8 +107,10 @@ export default function AdminLessonEditor() {
     }
   }, [draft, initialized, lessonId]);
 
-  const handleSave = useCallback(async () => {
-    if (!draft || !courseId || !moduleId || !lessonId) return;
+  const handleSave = useCallback(async (): Promise<number> => {
+    if (!draft || !courseId || !moduleId || !lessonId) {
+      throw new Error('Черновик урока не найден');
+    }
     setSaving(true);
     setSaveError('');
     setSaveMsg('');
@@ -94,23 +126,34 @@ export default function AdminLessonEditor() {
           }),
         };
       });
-      const dv = draft?.draft_version ?? 1;
-      await updateAdminDraft(courseId, { draft_version: dv, content_json: { modules: updatedModules } });
+      const result = await updateAdminDraft(courseId, {
+        draft_version: draftVersion,
+        title: draft.title,
+        description: draft.description,
+        age_min: draft.age_min,
+        age_max: draft.age_max,
+        cover_asset_id: draft.cover_asset_id,
+        content_json: { modules: updatedModules },
+      });
+      setDraftVersion(result.draft_version);
       setSaveMsg('Сохранено!');
       setTimeout(() => setSaveMsg(''), 2000);
+      return result.draft_version;
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка сохранения');
+      const message = err instanceof Error ? err.message : 'Ошибка сохранения';
+      setSaveError(message);
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       setSaving(false);
     }
-  }, [draft, courseId, moduleId, lessonId, lessonTitle, startNodeId, nodes, edges]);
+  }, [courseId, draft, draftVersion, edges, lessonId, lessonTitle, moduleId, nodes, startNodeId]);
 
   const handlePreview = useCallback(async () => {
     if (!courseId || !lessonId) return;
     try {
       await handleSave();
       const session = await createAdminPreview(courseId, lessonId);
-      window.open(`/admin/preview/${session.session_id}`, '_blank');
+      window.open(`/admin/preview/${session.preview_session_id}`, '_blank');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
     }
@@ -121,7 +164,7 @@ export default function AdminLessonEditor() {
     let data: Record<string, unknown> = {};
     if (type === 'story') data = { text: '', speaker: '' };
     if (type === 'single_choice') data = { question_text: '', options: [{ option_id: generateId(), text: '', is_correct: false }] };
-    if (type === 'free_text') data = { question_text: '', expected_answer: '' };
+    if (type === 'free_text') data = { question_text: '', reference_answer: '' };
 
     const terminalNode = nodes.find(n => n.type === 'terminal');
     const newNode: GraphNode = { id, type, data };
@@ -215,7 +258,7 @@ export default function AdminLessonEditor() {
         </div>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={handlePreview}>Превью</Button>
-          <Button onClick={handleSave} loading={saving}>Сохранить</Button>
+          <Button onClick={() => { void handleSave().catch(() => undefined); }} loading={saving}>Сохранить</Button>
         </div>
       </div>
 
@@ -313,9 +356,9 @@ export default function AdminLessonEditor() {
                     rows={2}
                   />
                   <Input
-                    label="Ожидаемый ответ"
-                    value={(node.data.expected_answer as string) ?? ''}
-                    onChange={e => updateNodeData(node.id, 'expected_answer', e.target.value)}
+                    label="Эталонный ответ"
+                    value={((node.data.reference_answer ?? node.data.expected_answer) as string) ?? ''}
+                    onChange={e => updateNodeData(node.id, 'reference_answer', e.target.value)}
                     placeholder="Правильный ответ"
                   />
                 </>

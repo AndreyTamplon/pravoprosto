@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, ComicPanel } from '../../components/ui';
 import styles from './StudentOnboarding.module.css';
 
@@ -28,14 +28,16 @@ const SLIDES = [
 
 export default function StudentOnboarding() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [current, setCurrent] = useState(0);
+  const returnTo = searchParams.get('return_to');
 
   const isLast = current === SLIDES.length - 1;
   const slide = SLIDES[current];
 
   const handleNext = () => {
     if (isLast) {
-      navigate('/student/courses');
+      navigate(returnTo || '/student/courses');
     } else {
       setCurrent((c) => c + 1);
     }

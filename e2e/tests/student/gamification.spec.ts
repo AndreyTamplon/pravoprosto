@@ -1,113 +1,52 @@
 import { test, expect } from '@playwright/test';
 import { fixtures } from '../../helpers/fixtures';
+import { createFreshStudentPage, openLessonAttempt } from '../../helpers/student-lessons';
 
 test.use({ storageState: '.auth/student.json' });
 
-/**
- * Helper: wait for the lesson player to finish loading and show first content.
- * The player goes through: loading -> story | single_choice | complete | error
- */
-async function waitForLessonReady(page: import('@playwright/test').Page) {
-  await expect(
-    page.getByRole('button', { name: 'Далее' })
-      .or(page.getByRole('button', { name: 'Проверить' }))
-      .or(page.getByText('Миссия выполнена!'))
-      .or(page.getByText('Что-то пошло не так'))
-  ).toBeVisible({ timeout: 15000 });
-}
-
-/**
- * Helper: advance past story screen if we are on one.
- * Clicks "Далее" until a question screen or completion screen appears.
- */
-async function advancePastStory(page: import('@playwright/test').Page) {
-  // Click "Далее" while it is the only action (story screens)
-  for (let i = 0; i < 5; i++) {
-    const daleeBtn = page.getByRole('button', { name: 'Далее' });
-    const checkBtn = page.getByRole('button', { name: 'Проверить' });
-    const complete = page.getByText('Миссия выполнена!');
-
-    // If we see a question or completion, stop
-    if (await checkBtn.isVisible().catch(() => false)) return;
-    if (await complete.isVisible().catch(() => false)) return;
-
-    // If no "Далее", we might be on a question already (options visible)
-    if (!(await daleeBtn.isVisible().catch(() => false))) return;
-
-    // Check if there are answer options visible — if so, this "Далее" is from feedback overlay
-    const hasOptions = await page.locator('button[class*="option"]').first().isVisible().catch(() => false);
-    if (hasOptions) return;
-
-    await daleeBtn.click();
-    // Wait briefly for transition
-    await page.waitForTimeout(500);
-  }
-}
-
 test.describe('Student -- Gamification (HUD, XP, hearts)', () => {
-  test('HUD bar shows XP and hearts during lesson', async ({ page }) => {
+  test('HUD bar shows XP and hearts during lesson', async ({ browser }) => {
     const { platformCourseId } = fixtures;
-
-    await page.goto(
-      `/student/courses/${platformCourseId}/lessons/lesson_phishing`,
-    );
-    await waitForLessonReady(page);
+    const { context, page } = await createFreshStudentPage(browser, 'gamification-hud');
+    await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
+    await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
 
     // HudBar renders: "♥ N/M" for hearts and "★ N" for XP
     await expect(page.getByText(/♥\s*\d+\/\d+/)).toBeVisible();
     await expect(page.getByText(/★\s*\d+/)).toBeVisible();
     // Streak indicator
     await expect(page.getByText(/🔥\s*\d+/)).toBeVisible();
+    await context.close();
   });
 
-  test('after correct answer, feedback shows ВЕРНО! and +XP', async ({ page }) => {
+  test('after correct answer, feedback shows ВЕРНО! and +XP', async ({ browser }) => {
     const { platformCourseId } = fixtures;
+    const { context, page } = await createFreshStudentPage(browser, 'gamification-correct');
+    await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
+    await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: 'Далее' }).click();
+    await expect(page.getByText('Что ты сделаешь с этим сообщением?')).toBeVisible();
 
-    await page.goto(
-      `/student/courses/${platformCourseId}/lessons/lesson_phishing`,
-    );
-    await waitForLessonReady(page);
-    await advancePastStory(page);
-
-    // We should now be on the first question: "Что ты сделаешь с этим сообщением?"
-    // Correct answer: "Покажу родителям и не буду переходить"
-    const correctOption = page.locator('button[class*="option"]', { hasText: /Покажу родителям/ });
-    if (await correctOption.isVisible().catch(() => false)) {
-      await correctOption.click();
-      await page.getByRole('button', { name: 'Проверить' }).click();
-
-      // Feedback overlay
-      await expect(page.getByText('ВЕРНО!', { exact: true })).toBeVisible({ timeout: 10000 });
-      await expect(page.getByText(/\+\d+\s*XP/)).toBeVisible();
-    } else {
-      // Lesson already progressed past first question — verify HUD XP is visible
-      await expect(page.getByText(/★\s*\d+/)).toBeVisible();
-    }
+    await page.getByRole('button', { name: /Покажу родителям и не буду переходить/ }).click();
+    await page.getByRole('button', { name: 'Проверить' }).click();
+    await expect(page.getByText('ВЕРНО!', { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/\+\d+\s*XP/)).toBeVisible();
+    await context.close();
   });
 
-  test('after wrong answer, feedback shows ПРОМАХ! and heart loss', async ({ page }) => {
+  test('after wrong answer, feedback shows ПРОМАХ! and heart loss', async ({ browser }) => {
     const { platformCourseId } = fixtures;
+    const { context, page } = await createFreshStudentPage(browser, 'gamification-wrong');
+    await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
+    await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: 'Далее' }).click();
+    await expect(page.getByText('Что ты сделаешь с этим сообщением?')).toBeVisible();
 
-    await page.goto(
-      `/student/courses/${platformCourseId}/lessons/lesson_phishing`,
-    );
-    await waitForLessonReady(page);
-    await advancePastStory(page);
-
-    // Wrong answer: "Перейду по ссылке — вдруг правда приз!"
-    const wrongOption = page.locator('button[class*="option"]', { hasText: /Перейду по ссылке/ });
-    if (await wrongOption.isVisible().catch(() => false)) {
-      await wrongOption.click();
-      await page.getByRole('button', { name: 'Проверить' }).click();
-
-      // Feedback overlay should show miss
-      await expect(page.getByText('ПРОМАХ!', { exact: true })).toBeVisible({ timeout: 10000 });
-      // Heart loss: "-1 ❤️"
-      await expect(page.getByText(/-\d+\s*❤/)).toBeVisible();
-    } else {
-      // Lesson past first question — verify HUD hearts
-      await expect(page.getByText(/♥\s*\d+\/\d+/)).toBeVisible();
-    }
+    await page.getByRole('button', { name: /Перейду по ссылке/ }).click();
+    await page.getByRole('button', { name: 'Проверить' }).click();
+    await expect(page.getByText('ПРОМАХ!', { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/-\d+\s*❤/)).toBeVisible();
+    await context.close();
   });
 
   test('profile shows XP, level, streak, and lessons stats', async ({ page }) => {
@@ -135,37 +74,35 @@ test.describe('Student -- Gamification (HUD, XP, hearts)', () => {
     await expect(page.getByText(/^Уровень\s*\d+$/).first()).toBeVisible();
   });
 
-  test('HUD progress bar advances through lesson', async ({ page }) => {
+  test('HUD progress bar advances through lesson', async ({ browser }) => {
     const { platformCourseId } = fixtures;
-
-    await page.goto(
-      `/student/courses/${platformCourseId}/lessons/lesson_phishing`,
-    );
-    await waitForLessonReady(page);
+    const { context, page } = await createFreshStudentPage(browser, 'gamification-progress');
+    await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
+    await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
 
     // Progress bar should be visible in the HUD
     const progressBar = page.locator('[class*="progressWrap"]');
     await expect(progressBar).toBeVisible();
 
-    // Advance past story if on one
-    await advancePastStory(page);
+    await page.getByRole('button', { name: 'Далее' }).click();
+    await expect(page.getByText('Что ты сделаешь с этим сообщением?')).toBeVisible();
 
     // Progress bar should still be visible after advancing
     await expect(progressBar).toBeVisible();
+    await context.close();
   });
 
-  test('HUD close button navigates back to course tree', async ({ page }) => {
+  test('HUD close button navigates back to course tree', async ({ browser }) => {
     const { platformCourseId } = fixtures;
-
-    await page.goto(
-      `/student/courses/${platformCourseId}/lessons/lesson_phishing`,
-    );
-    await waitForLessonReady(page);
+    const { context, page } = await createFreshStudentPage(browser, 'gamification-close');
+    await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
+    await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
 
     // Click the close button (aria-label="Close")
     await page.getByRole('button', { name: 'Close' }).click();
 
     // Should navigate to course tree
     await page.waitForURL(`**/student/courses/${platformCourseId}`);
+    await context.close();
   });
 });

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { claimCourseLink, claimGuardianLink } from '../../api/client';
+import { ApiRequestError, claimCourseLink, claimGuardianLink } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 import { Button, ComicPanel, Spinner } from '../../components/ui';
 import styles from './ClaimLink.module.css';
 
@@ -10,6 +11,7 @@ export default function ClaimLink() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { loading, session } = useAuth();
 
   // Backend generates URLs with hash fragment: /claim/course-link#token=...
   // Hash fragments aren't in searchParams, so check both
@@ -19,13 +21,37 @@ export default function ClaimLink() {
 
   const [state, setState] = useState<ClaimState>('loading');
   const [errorMsg, setErrorMsg] = useState('');
+  const claimedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (loading || !session?.authenticated) {
+      return;
+    }
+
+    if (session.onboarding.role_selection_required) {
+      navigate(`/role-select?return_to=${encodeURIComponent(location.pathname + location.search + location.hash)}`, {
+        replace: true,
+      });
+      return;
+    }
+
+    if (session.user?.role !== 'student') {
+      setState('error');
+      setErrorMsg('Ссылку может активировать только ученик.');
+      return;
+    }
+
     if (!token) {
       setState('error');
       setErrorMsg('Ссылка недействительна: отсутствует токен');
       return;
     }
+
+    const claimKey = `${isGuardian ? 'guardian' : 'course'}:${token}`;
+    if (claimedKeyRef.current === claimKey) {
+      return;
+    }
+    claimedKeyRef.current = claimKey;
 
     const claim = async () => {
       try {
@@ -37,12 +63,16 @@ export default function ClaimLink() {
         setState('success');
       } catch (err) {
         setState('error');
+        if (err instanceof ApiRequestError && err.status === 403) {
+          setErrorMsg('Ссылку может активировать только ученик.');
+          return;
+        }
         setErrorMsg(err instanceof Error ? err.message : 'Не удалось активировать ссылку');
       }
     };
 
     claim();
-  }, [token, isGuardian]);
+  }, [isGuardian, loading, location.hash, location.pathname, location.search, navigate, session, token]);
 
   const handleContinue = () => {
     if (isGuardian) {

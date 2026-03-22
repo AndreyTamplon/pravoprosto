@@ -36,8 +36,11 @@ type CreateLinkInput struct {
 
 type CreateLinkView struct {
 	LinkID    string  `json:"link_id"`
-	ClaimURL  string  `json:"claim_url"`
+	ClaimURL  *string `json:"claim_url,omitempty"`
+	InviteURL *string `json:"invite_url,omitempty"`
+	URLStatus string  `json:"url_status"`
 	Status    string  `json:"status"`
+	CreatedAt string  `json:"created_at"`
 	ExpiresAt *string `json:"expires_at"`
 }
 
@@ -108,6 +111,7 @@ func (s *Service) CreateLink(ctx context.Context, teacherID string, courseID str
 	if err != nil {
 		return CreateLinkView{}, err
 	}
+	createdAt := time.Now().UTC()
 	if err := s.db.QueryRow(ctx, `
 		insert into course_access_links(course_id, token_hash, token_encrypted, status, expires_at, created_by_account_id)
 		values ($1, $2, $3, 'active', $4, $5)
@@ -120,10 +124,14 @@ func (s *Service) CreateLink(ctx context.Context, teacherID string, courseID str
 		formatted := input.ExpiresAt.UTC().Format(time.RFC3339)
 		expiresAt = &formatted
 	}
+	claimURL := strings.TrimRight(s.config.BaseURL, "/") + "/claim/course-link#token=" + token
 	return CreateLinkView{
 		LinkID:    linkID,
-		ClaimURL:  strings.TrimRight(s.config.BaseURL, "/") + "/claim/course-link#token=" + token,
+		ClaimURL:  &claimURL,
+		InviteURL: &claimURL,
+		URLStatus: "available",
 		Status:    "active",
+		CreatedAt: createdAt.Format(time.RFC3339),
 		ExpiresAt: expiresAt,
 	}, nil
 }
@@ -133,7 +141,7 @@ func (s *Service) ListLinks(ctx context.Context, teacherID string, courseID stri
 		return LinkListView{}, err
 	}
 	rows, err := s.db.Query(ctx, `
-		select id::text, token_encrypted, status, expires_at::text
+		select id::text, token_encrypted, status, created_at::text, expires_at::text
 		from course_access_links
 		where course_id = $1 and created_by_account_id = $2
 		order by created_at desc
@@ -145,14 +153,21 @@ func (s *Service) ListLinks(ctx context.Context, teacherID string, courseID stri
 
 	items := make([]CreateLinkView, 0)
 	for rows.Next() {
-		var linkID, tokenEncrypted, status string
+		var linkID, status, createdAt string
+		var tokenEncrypted *string
 		var expiresAt *string
-		if err := rows.Scan(&linkID, &tokenEncrypted, &status, &expiresAt); err != nil {
+		if err := rows.Scan(&linkID, &tokenEncrypted, &status, &createdAt, &expiresAt); err != nil {
 			return LinkListView{}, err
 		}
-		token, err := decryptToken(tokenEncrypted, s.config.SigningSecret)
-		if err != nil {
-			return LinkListView{}, err
+		var claimURL *string
+		urlStatus := "legacy_unavailable"
+		if tokenEncrypted != nil && strings.TrimSpace(*tokenEncrypted) != "" {
+			token, err := decryptToken(*tokenEncrypted, s.config.SigningSecret)
+			if err == nil {
+				url := strings.TrimRight(s.config.BaseURL, "/") + "/claim/course-link#token=" + token
+				claimURL = &url
+				urlStatus = "available"
+			}
 		}
 		if status == "active" && expiresAt != nil {
 			if parsed, err := time.Parse(time.RFC3339, *expiresAt); err == nil && time.Now().After(parsed) {
@@ -161,8 +176,11 @@ func (s *Service) ListLinks(ctx context.Context, teacherID string, courseID stri
 		}
 		items = append(items, CreateLinkView{
 			LinkID:    linkID,
-			ClaimURL:  strings.TrimRight(s.config.BaseURL, "/") + "/claim/course-link#token=" + token,
+			ClaimURL:  claimURL,
+			InviteURL: claimURL,
+			URLStatus: urlStatus,
 			Status:    status,
+			CreatedAt: createdAt,
 			ExpiresAt: expiresAt,
 		})
 	}

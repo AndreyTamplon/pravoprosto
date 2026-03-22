@@ -91,8 +91,29 @@ func DecodeComplimentaryGrantInput(r *http.Request) (ComplimentaryGrantInput, er
 
 func (s *Service) ListOffers(ctx context.Context) (map[string]any, error) {
 	rows, err := s.db.Query(ctx, `
-		select id::text, title, status, target_type, target_course_id::text, target_lesson_id, price_amount_minor, price_currency
-		from commercial_offers
+		select o.id::text,
+		       o.title,
+		       o.description,
+		       o.status,
+		       o.target_type,
+		       o.target_course_id::text,
+		       o.target_lesson_id,
+		       o.price_amount_minor,
+		       o.price_currency,
+		       o.created_at::text,
+		       coalesce(cr.title, d.title) as course_title,
+		       coalesce(crl.title, draft_lesson.lesson_title) as lesson_title
+		from commercial_offers o
+		left join course_drafts d on d.course_id = o.target_course_id
+		left join course_revisions cr on cr.course_id = o.target_course_id and cr.is_current = true
+		left join course_revision_lessons crl on crl.course_revision_id = cr.id and crl.lesson_id = o.target_lesson_id
+		left join lateral (
+		    select lesson->>'title' as lesson_title
+		    from jsonb_array_elements(coalesce(d.content_json->'modules', '[]'::jsonb)) module,
+		         jsonb_array_elements(coalesce(module->'lessons', '[]'::jsonb)) lesson
+		    where lesson->>'id' = o.target_lesson_id
+		    limit 1
+		) draft_lesson on true
 		order by created_at desc
 	`)
 	if err != nil {
@@ -101,21 +122,25 @@ func (s *Service) ListOffers(ctx context.Context) (map[string]any, error) {
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var offerID, title, status, targetType, targetCourseID, priceCurrency string
-		var targetLessonID *string
+		var offerID, title, description, status, targetType, targetCourseID, priceCurrency, createdAt, courseTitle string
+		var targetLessonID, lessonTitle *string
 		var amount int64
-		if err := rows.Scan(&offerID, &title, &status, &targetType, &targetCourseID, &targetLessonID, &amount, &priceCurrency); err != nil {
+		if err := rows.Scan(&offerID, &title, &description, &status, &targetType, &targetCourseID, &targetLessonID, &amount, &priceCurrency, &createdAt, &courseTitle, &lessonTitle); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
 			"offer_id":           offerID,
 			"title":              title,
+			"description":        description,
 			"status":             status,
 			"target_type":        targetType,
 			"target_course_id":   targetCourseID,
 			"target_lesson_id":   targetLessonID,
 			"price_amount_minor": amount,
 			"price_currency":     priceCurrency,
+			"created_at":         createdAt,
+			"course_title":       courseTitle,
+			"lesson_title":       lessonTitle,
 		})
 	}
 	return map[string]any{"items": items}, rows.Err()
@@ -230,7 +255,7 @@ func (s *Service) CreatePurchaseRequest(ctx context.Context, studentID string, o
 
 func (s *Service) ListPurchaseRequests(ctx context.Context) (map[string]any, error) {
 	rows, err := s.db.Query(ctx, `
-		select pr.id::text, sp.account_id::text, sp.display_name, o.id::text, o.title, pr.status, pr.created_at::text
+		select pr.id::text, sp.account_id::text, sp.display_name, o.id::text, o.title, o.target_type, pr.status, pr.created_at::text
 		from purchase_requests pr
 		join student_profiles sp on sp.account_id = pr.student_id
 		join commercial_offers o on o.id = pr.offer_id
@@ -242,8 +267,8 @@ func (s *Service) ListPurchaseRequests(ctx context.Context) (map[string]any, err
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var requestID, studentID, displayName, offerID, title, status, createdAt string
-		if err := rows.Scan(&requestID, &studentID, &displayName, &offerID, &title, &status, &createdAt); err != nil {
+		var requestID, studentID, displayName, offerID, title, targetType, status, createdAt string
+		if err := rows.Scan(&requestID, &studentID, &displayName, &offerID, &title, &targetType, &status, &createdAt); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
@@ -256,6 +281,7 @@ func (s *Service) ListPurchaseRequests(ctx context.Context) (map[string]any, err
 				"offer_id": offerID,
 				"title":    title,
 			},
+			"target_type": targetType,
 			"status":     status,
 			"created_at": createdAt,
 		})
@@ -295,7 +321,17 @@ func (s *Service) DeclinePurchaseRequest(ctx context.Context, requestID string, 
 
 func (s *Service) ListOrders(ctx context.Context, status string, studentID string) (map[string]any, error) {
 	query := `
-		select o.id::text, sp.account_id::text, sp.display_name, co.id::text, co.title, o.status, o.price_snapshot_amount_minor, o.price_snapshot_currency, o.created_at::text
+		select o.id::text,
+		       sp.account_id::text,
+		       sp.display_name,
+		       co.id::text,
+		       co.title,
+		       o.target_type,
+		       o.status,
+		       o.price_snapshot_amount_minor,
+		       o.price_snapshot_currency,
+		       o.created_at::text,
+		       o.fulfilled_at::text
 		from commercial_orders o
 		join student_profiles sp on sp.account_id = o.student_id
 		join commercial_offers co on co.id = o.offer_id
@@ -310,9 +346,10 @@ func (s *Service) ListOrders(ctx context.Context, status string, studentID strin
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var orderID, accountID, displayName, offerID, title, orderStatus, currency, createdAt string
+		var orderID, accountID, displayName, offerID, title, targetType, orderStatus, currency, createdAt string
+		var fulfilledAt *string
 		var amount int64
-		if err := rows.Scan(&orderID, &accountID, &displayName, &offerID, &title, &orderStatus, &amount, &currency, &createdAt); err != nil {
+		if err := rows.Scan(&orderID, &accountID, &displayName, &offerID, &title, &targetType, &orderStatus, &amount, &currency, &createdAt, &fulfilledAt); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
@@ -325,10 +362,12 @@ func (s *Service) ListOrders(ctx context.Context, status string, studentID strin
 				"offer_id": offerID,
 				"title":    title,
 			},
+			"target_type":        targetType,
 			"status":             orderStatus,
 			"price_amount_minor": amount,
 			"currency":           currency,
 			"created_at":         createdAt,
+			"fulfilled_at":       fulfilledAt,
 		})
 	}
 	return map[string]any{"items": items}, rows.Err()

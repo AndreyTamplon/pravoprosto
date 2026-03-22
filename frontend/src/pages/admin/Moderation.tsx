@@ -1,10 +1,21 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useApi } from '../../hooks/useApi';
-import { getModerationQueue, approveReview, rejectReview, createAdminPreview } from '../../api/client';
-import { Button, Badge, Spinner, Modal, EmptyState } from '../../components/ui';
+import {
+  getModerationQueue,
+  approveReview,
+  rejectReview,
+  createModerationPreview,
+  getModerationReviewDraft,
+} from '../../api/client';
+import { Button, Badge, Spinner, Modal, EmptyState, Select } from '../../components/ui';
 import { formatDateTime } from '../../utils/format';
 import type { PendingReview } from '../../api/types';
 import styles from './Moderation.module.css';
+
+interface PreviewLessonOption {
+  lessonId: string;
+  label: string;
+}
 
 export default function Moderation() {
   const { data, loading, error, reload } = useApi<PendingReview[]>(() => getModerationQueue(), []);
@@ -13,6 +24,52 @@ export default function Moderation() {
   const [rejectComment, setRejectComment] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [previewLessons, setPreviewLessons] = useState<PreviewLessonOption[]>([]);
+  const [previewLessonId, setPreviewLessonId] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLessons = async () => {
+      if (!selected) {
+        setPreviewLessons([]);
+        setPreviewLessonId('');
+        return;
+      }
+
+      setPreviewLoading(true);
+      setActionError('');
+      try {
+        const draft = await getModerationReviewDraft(selected.review_id);
+        const lessons = (draft.content_json.modules ?? []).flatMap(module =>
+          module.lessons.map((lesson, index) => ({
+            lessonId: lesson.id,
+            label: `${module.title} / ${index + 1}. ${lesson.title}`,
+          })),
+        );
+        if (!cancelled) {
+          setPreviewLessons(lessons);
+          setPreviewLessonId(lessons[0]?.lessonId ?? '');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPreviewLessons([]);
+          setPreviewLessonId('');
+          setActionError(err instanceof Error ? err.message : 'Не удалось загрузить уроки');
+        }
+      } finally {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      }
+    };
+
+    void loadLessons();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   const handleApprove = useCallback(async (review: PendingReview) => {
     setActionLoading(true);
@@ -46,14 +103,17 @@ export default function Moderation() {
   }, [rejectComment, reload]);
 
   const handlePreview = useCallback(async (review: PendingReview) => {
+    if (!previewLessonId) {
+      setActionError('Выберите урок для предпросмотра');
+      return;
+    }
     try {
-      // Preview the first lesson of the course
-      const session = await createAdminPreview(review.course_id, 'first');
-      window.open(`/admin/preview/${session.session_id}`, '_blank');
+      const session = await createModerationPreview(review.review_id, previewLessonId);
+      window.open(`/admin/preview/${session.preview_session_id}`, '_blank');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
     }
-  }, []);
+  }, [previewLessonId]);
 
   if (loading) return <Spinner />;
 
@@ -79,12 +139,20 @@ export default function Moderation() {
             </tr>
           </thead>
           <tbody>
-            {data.map(r => (
-              <tr key={r.review_id} onClick={() => { setSelected(r); setShowReject(false); setRejectComment(''); setActionError(''); }}>
-                <td className={styles.courseTitle}>{r.course_title}</td>
-                <td>{r.teacher_name}</td>
-                <td>{formatDateTime(r.submitted_at)}</td>
-                <td><Badge color="gray">v{r.draft_version}</Badge></td>
+            {data.map(review => (
+              <tr
+                key={review.review_id}
+                onClick={() => {
+                  setSelected(review);
+                  setShowReject(false);
+                  setRejectComment('');
+                  setActionError('');
+                }}
+              >
+                <td className={styles.courseTitle}>{review.course_title}</td>
+                <td>{review.teacher_name}</td>
+                <td>{formatDateTime(review.submitted_at)}</td>
+                <td><Badge color="gray">v{review.draft_version}</Badge></td>
               </tr>
             ))}
           </tbody>
@@ -115,10 +183,34 @@ export default function Moderation() {
               <span className={styles.infoValue}>{selected.course_id}</span>
             </div>
 
+            {previewLoading ? (
+              <Spinner text="Загрузка уроков..." />
+            ) : (
+              <Select
+                label="Урок для предпросмотра"
+                value={previewLessonId}
+                onChange={event => setPreviewLessonId(event.target.value)}
+              >
+                {previewLessons.length === 0 ? (
+                  <option value="">Нет уроков для предпросмотра</option>
+                ) : (
+                  previewLessons.map(lesson => (
+                    <option key={lesson.lessonId} value={lesson.lessonId}>
+                      {lesson.label}
+                    </option>
+                  ))
+                )}
+              </Select>
+            )}
+
             {actionError && <div className={styles.error}>{actionError}</div>}
 
             <div className={styles.reviewActions}>
-              <Button variant="secondary" onClick={() => handlePreview(selected)}>
+              <Button
+                variant="secondary"
+                onClick={() => handlePreview(selected)}
+                disabled={previewLoading || !previewLessonId}
+              >
                 Предпросмотр
               </Button>
               <Button variant="success" onClick={() => handleApprove(selected)} loading={actionLoading && !showReject}>

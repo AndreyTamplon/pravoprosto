@@ -272,8 +272,7 @@ function RequestsTab() {
       await createManualOrder({
         student_id: req.student_id,
         offer_id: req.offer_id,
-        source: 'purchase_request',
-        request_id: req.request_id,
+        purchase_request_id: req.request_id,
       });
       setShowCreateOrder(null);
       reload();

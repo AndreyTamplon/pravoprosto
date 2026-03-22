@@ -38,6 +38,7 @@ type CourseTreeView struct {
 	CourseRevisionID string           `json:"course_revision_id"`
 	Title            string           `json:"title"`
 	Description      string           `json:"description"`
+	Progress         map[string]any   `json:"progress,omitempty"`
 	Modules          []map[string]any `json:"modules"`
 }
 
@@ -262,12 +263,54 @@ func (s *Service) CourseTree(ctx context.Context, studentID string, courseID str
 	if err != nil {
 		return CourseTreeView{}, err
 	}
+	progress, err := s.courseTreeProgress(ctx, studentID, courseID, revisionID)
+	if err != nil {
+		return CourseTreeView{}, err
+	}
 	return CourseTreeView{
 		CourseID:         courseID,
 		CourseRevisionID: revisionID,
 		Title:            title,
 		Description:      description,
+		Progress:         progress,
 		Modules:          modules,
+	}, nil
+}
+
+func (s *Service) courseTreeProgress(ctx context.Context, studentID string, courseID string, revisionID string) (map[string]any, error) {
+	var status string
+	var completedLessons int
+	var totalLessons int
+	var lastActivityAt *string
+	err := s.db.QueryRow(ctx, `
+		select cp.status,
+		       coalesce((
+		           select count(*)
+		           from lesson_progress lp
+		           where lp.course_progress_id = cp.id and lp.status = 'completed'
+		       ), 0),
+		       (
+		           select count(*)
+		           from course_revision_lessons crl
+		           where crl.course_revision_id = cp.course_revision_id
+		       ),
+		       cp.last_activity_at::text
+		from course_progress cp
+		where cp.student_id = $1 and cp.course_id = $2 and cp.course_revision_id = $3
+		order by case when cp.status = 'in_progress' then 0 else 1 end, cp.started_at desc
+		limit 1
+	`, studentID, courseID, revisionID).Scan(&status, &completedLessons, &totalLessons, &lastActivityAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"status":            status,
+		"completed_lessons": completedLessons,
+		"total_lessons":     totalLessons,
+		"last_activity_at":  lastActivityAt,
 	}, nil
 }
 

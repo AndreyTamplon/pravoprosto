@@ -5,6 +5,7 @@ import {
   getAdminDraft, updateAdminDraft, publishAdminCourse, createAdminPreview,
 } from '../../api/client';
 import { Button, Badge, Spinner, Modal, Input, EmptyState } from '../../components/ui';
+import { graphToBackendFormat, isBackendLessonGraph } from '../../api/types';
 import type { CourseDraft, ContentModule, ContentLesson, LessonGraph } from '../../api/types';
 import styles from './AdminCourseEditor.module.css';
 
@@ -14,6 +15,19 @@ function emptyGraph(): LessonGraph {
 
 function generateId(): string {
   return crypto.randomUUID().slice(0, 8);
+}
+
+function serializeModules(modules: ContentModule[]): ContentModule[] {
+  return modules.map(module => ({
+    ...module,
+    lessons: module.lessons.map(lesson => {
+      const rawGraph = lesson.graph as unknown as Record<string, unknown>;
+      return {
+        ...lesson,
+        graph: (isBackendLessonGraph(rawGraph) ? rawGraph : graphToBackendFormat(lesson.graph)) as unknown as ContentLesson['graph'],
+      };
+    }),
+  }));
 }
 
 export default function AdminCourseEditor() {
@@ -59,29 +73,43 @@ export default function AdminCourseEditor() {
     }
   }, [draft, initialized]);
 
-  const handleSave = useCallback(async () => {
-    if (!courseId) return;
+  const saveCurrentDraft = useCallback(async (showSavedState = false): Promise<number> => {
+    if (!courseId) {
+      throw new Error('Курс не найден');
+    }
+
+    const res = await updateAdminDraft(courseId, {
+      draft_version: draftVersion,
+      title: localTitle,
+      description: localDesc,
+      age_min: localAgeMin ? Number(localAgeMin) : undefined,
+      age_max: localAgeMax ? Number(localAgeMax) : undefined,
+      cover_asset_id: draft?.cover_asset_id,
+      content_json: { modules: serializeModules(localModules) },
+    });
+
+    setDraftVersion(res.draft_version);
+    if (showSavedState) {
+      setSaveMsg('Сохранено!');
+      setTimeout(() => setSaveMsg(''), 2000);
+    }
+    return res.draft_version;
+  }, [courseId, draft?.cover_asset_id, draftVersion, localAgeMax, localAgeMin, localDesc, localModules, localTitle]);
+
+  const handleSave = useCallback(async (): Promise<number> => {
     setSaving(true);
     setSaveError('');
     setSaveMsg('');
     try {
-      const res = await updateAdminDraft(courseId, {
-        draft_version: draftVersion,
-        title: localTitle,
-        description: localDesc,
-        age_min: localAgeMin ? Number(localAgeMin) : undefined,
-        age_max: localAgeMax ? Number(localAgeMax) : undefined,
-        content_json: { modules: localModules },
-      });
-      setDraftVersion(res.draft_version);
-      setSaveMsg('Сохранено!');
-      setTimeout(() => setSaveMsg(''), 2000);
+      return await saveCurrentDraft(true);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка сохранения');
+      const message = err instanceof Error ? err.message : 'Ошибка сохранения';
+      setSaveError(message);
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       setSaving(false);
     }
-  }, [courseId, draftVersion, localTitle, localDesc, localAgeMin, localAgeMax, localModules]);
+  }, [saveCurrentDraft]);
 
   const handlePublish = useCallback(async () => {
     if (!courseId) return;
@@ -102,14 +130,31 @@ export default function AdminCourseEditor() {
     if (!courseId) return;
     setPreviewing(true);
     try {
+      await handleSave();
       const session = await createAdminPreview(courseId, lessonId);
-      window.open(`/admin/preview/${session.session_id}`, '_blank');
+      window.open(`/admin/preview/${session.preview_session_id}`, '_blank');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
     } finally {
       setPreviewing(false);
     }
-  }, [courseId]);
+  }, [courseId, handleSave]);
+
+  async function handleEditLesson(lessonId: string) {
+    if (!courseId) return;
+
+    setSaving(true);
+    setSaveError('');
+    setSaveMsg('');
+    try {
+      await saveCurrentDraft();
+      navigate(`/admin/courses/${courseId}/lessons/${lessonId}`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Ошибка сохранения');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function addModule() {
     if (!newModuleTitle.trim()) return;
@@ -167,7 +212,7 @@ export default function AdminCourseEditor() {
           </span>
         </div>
         <div className={styles.headerActions}>
-          <Button variant="secondary" onClick={handleSave} loading={saving}>Сохранить</Button>
+          <Button variant="secondary" onClick={() => { void handleSave().catch(() => undefined); }} loading={saving}>Сохранить</Button>
           <Button variant="success" onClick={handlePublish} loading={publishing}>Опубликовать</Button>
         </div>
       </div>
@@ -228,7 +273,7 @@ export default function AdminCourseEditor() {
                       <div className={styles.lessonMeta}>{lesson.graph.nodes.length} нод</div>
                     </div>
                     <div className={styles.moduleActions}>
-                      <Button size="sm" variant="ghost" onClick={() => navigate(`/admin/courses/${courseId}/lessons/${lesson.id}`)}>
+                      <Button size="sm" variant="ghost" onClick={() => { void handleEditLesson(lesson.id); }}>
                         Редактировать
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => handlePreview(lesson.id)} loading={previewing}>

@@ -13,83 +13,178 @@
  */
 import { test, expect } from '@playwright/test';
 import { fixtures } from '../../helpers/fixtures';
+import { createFreshStudentPage } from '../../helpers/student-lessons';
+
+const STUDENT_NAME = 'Алиса';
+const OFFER_TITLE = 'Урок: Персональные данные';
+
+async function pollForValue<T>(
+  load: () => Promise<T>,
+  isReady: (value: T) => boolean,
+  timeout = 10000,
+): Promise<T> {
+  const startedAt = Date.now();
+  let lastValue = await load();
+  while (!isReady(lastValue)) {
+    if (Date.now() - startedAt >= timeout) {
+      return lastValue;
+    }
+    await new Promise(resolve => setTimeout(resolve, 400));
+    lastValue = await load();
+  }
+  return lastValue;
+}
+
+async function ensureAlicePurchaseRequest(
+  browser: import('@playwright/test').Browser,
+  platformCourseId: string,
+  offerId: string,
+) {
+  const studentCtx = await browser.newContext({ storageState: '.auth/student.json' });
+  const studentPage = await studentCtx.newPage();
+  await studentPage.goto(`/student/courses/${platformCourseId}`);
+  await expect(studentPage.getByText('Что нельзя рассказывать в интернете')).toBeVisible({ timeout: 10000 });
+
+  const purchaseButton = studentPage.getByRole('button', { name: 'Оставить заявку' });
+  const requestSentButton = studentPage.getByRole('button', { name: 'Заявка отправлена' });
+
+  if (await purchaseButton.isVisible().catch(() => false)) {
+    const purchaseResponse = studentPage.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().includes(`/student/offers/${offerId}/purchase-requests`),
+    );
+    await purchaseButton.click();
+    expect((await purchaseResponse).ok()).toBeTruthy();
+    await studentPage.goto(`/student/courses/${platformCourseId}`);
+  }
+
+  const awaitingBadge = studentPage.getByText('Ожидает подтверждения');
+  await expect(requestSentButton.or(awaitingBadge)).toBeVisible();
+  await studentCtx.close();
+}
+
+async function fetchRequestId(
+  adminPage: import('@playwright/test').Page,
+  offerId: string,
+  studentName: string,
+): Promise<string> {
+  return adminPage.evaluate(async ({ currentOfferId, currentStudentName }) => {
+    const response = await fetch('/api/v1/admin/commerce/purchase-requests', {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return '';
+    const body = await response.json().catch(() => null);
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const match = items.find((item: Record<string, unknown>) => {
+      const student = (item.student ?? {}) as Record<string, unknown>;
+      const offer = (item.offer ?? {}) as Record<string, unknown>;
+      return (student.display_name ?? item.student_name) === currentStudentName
+        && (offer.offer_id ?? item.offer_id) === currentOfferId
+        && item.status === 'open';
+    });
+    return (match?.purchase_request_id as string | undefined) ?? '';
+  }, { currentOfferId: offerId, currentStudentName: studentName });
+}
+
+async function ensureOrderForStudent(
+  adminPage: import('@playwright/test').Page,
+  offerId: string,
+  studentName: string,
+): Promise<string> {
+  const fetchExistingOrderId = async () => adminPage.evaluate(async ({ currentOfferId, currentStudentName }) => {
+    const response = await fetch('/api/v1/admin/commerce/orders', {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return '';
+    const body = await response.json().catch(() => null);
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const match = items.find((item: Record<string, unknown>) => {
+      const student = (item.student ?? {}) as Record<string, unknown>;
+      const offer = (item.offer ?? {}) as Record<string, unknown>;
+      return (student.display_name ?? item.student_name) === currentStudentName
+        && (offer.offer_id ?? item.offer_id) === currentOfferId;
+    });
+    return (match?.order_id as string | undefined) ?? '';
+  }, { currentOfferId: offerId, currentStudentName: studentName });
+
+  const existingOrderId = await fetchExistingOrderId();
+  if (existingOrderId) {
+    return existingOrderId;
+  }
+
+  const requestId = await pollForValue(
+    () => fetchRequestId(adminPage, offerId, studentName),
+    value => value !== '',
+    15000,
+  );
+  expect(requestId).not.toBe('');
+
+  await adminPage.getByRole('button', { name: 'Заявки' }).click();
+  const requestRow = adminPage.locator('tbody tr')
+    .filter({ hasText: studentName })
+    .filter({ hasText: OFFER_TITLE })
+    .first();
+  await expect(requestRow).toBeVisible({ timeout: 10000 });
+
+  const createOrderResponse = adminPage.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && response.url().includes('/commerce/orders/manual'),
+  );
+  await requestRow.getByRole('button', { name: 'Создать заказ' }).click();
+  await expect(adminPage.getByText('Создать заказ из заявки')).toBeVisible();
+  await adminPage.getByRole('button', { name: 'Подтвердить' }).click();
+  const createOrderResult = await createOrderResponse;
+  expect(createOrderResult.ok()).toBeTruthy();
+  const createOrderBody = await createOrderResult.json().catch(() => null);
+  const createdOrderId = (createOrderBody?.order_id as string | undefined) ?? '';
+  expect(createdOrderId).not.toBe('');
+  return createdOrderId;
+}
 
 test.describe('QA Bug 4: Commerce data renders correctly', () => {
   test('purchase requests tab shows student name and offer title (not empty)', async ({ browser }) => {
-    const { platformCourseId } = fixtures;
+    const { platformCourseId, offerId } = fixtures;
+    await ensureAlicePurchaseRequest(browser, platformCourseId, offerId);
 
-    // First: student submits a purchase request
-    const studentCtx = await browser.newContext({ storageState: '.auth/student.json' });
-    const studentPage = await studentCtx.newPage();
-
-    await studentPage.goto(`/student/courses/${platformCourseId}`);
-    await expect(studentPage.getByText('Что нельзя рассказывать в интернете')).toBeVisible({ timeout: 10000 });
-
-    // Click purchase request button (if available)
-    const purchaseBtn = studentPage.getByRole('button', { name: /Оставить заявку/i });
-    const canRequest = await purchaseBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    if (canRequest) {
-      await purchaseBtn.click();
-      await studentPage.waitForTimeout(2000);
-    }
-    await studentCtx.close();
-
-    // Now: admin views requests tab
     const adminCtx = await browser.newContext({ storageState: '.auth/admin.json' });
     const adminPage = await adminCtx.newPage();
 
     await adminPage.goto('/admin/commerce');
     await expect(adminPage.getByRole('heading', { name: 'Коммерция' })).toBeVisible({ timeout: 10000 });
-
-    // Switch to Requests tab
     await adminPage.getByRole('button', { name: 'Заявки' }).click();
-    await adminPage.waitForTimeout(2000);
-
-    // Bug 4: If backend sends nested {student: {display_name}} but frontend
-    // expects flat {student_name}, the name column will show "undefined" or empty
-    const hasRequest = await adminPage.getByText('Открыта').isVisible({ timeout: 5000 }).catch(() => false);
-
-    if (hasRequest) {
-      // Student name should be "Алиса", NOT "undefined" or empty
-      await expect(adminPage.getByText('Алиса')).toBeVisible();
-      // Offer title should be visible, NOT "undefined"
-      await expect(adminPage.getByText('Урок: Персональные данные')).toBeVisible();
-
-      // Should NOT show "undefined" anywhere in the table
-      const undefinedCount = await adminPage.locator('td:has-text("undefined")').count();
-      expect(undefinedCount).toBe(0);
-    }
+    const requestRow = adminPage.locator('tbody tr')
+      .filter({ hasText: STUDENT_NAME })
+      .filter({ hasText: OFFER_TITLE })
+      .filter({ hasText: 'Открыта' })
+      .first();
+    await expect(requestRow).toBeVisible({ timeout: 10000 });
+    await expect(requestRow).not.toContainText('undefined');
+    await expect(requestRow).not.toContainText('NaN');
 
     await adminCtx.close();
   });
 
   test('orders tab shows student name and offer details correctly', async ({ browser }) => {
+    const { platformCourseId, offerId } = fixtures;
+    await ensureAlicePurchaseRequest(browser, platformCourseId, offerId);
+
     const adminCtx = await browser.newContext({ storageState: '.auth/admin.json' });
     const adminPage = await adminCtx.newPage();
-
     await adminPage.goto('/admin/commerce');
     await expect(adminPage.getByRole('heading', { name: 'Коммерция' })).toBeVisible({ timeout: 10000 });
+    await ensureOrderForStudent(adminPage, offerId, STUDENT_NAME);
 
-    // Switch to Orders tab
     await adminPage.getByRole('button', { name: 'Заказы' }).click();
-    await adminPage.waitForTimeout(2000);
-
-    // Check for any orders
-    const hasOrders = await adminPage.getByText(/Ожидает оплаты|Выполнен/).isVisible({ timeout: 3000 }).catch(() => false);
-
-    if (hasOrders) {
-      // Order row should NOT have "undefined" values
-      const undefinedCount = await adminPage.locator('td:has-text("undefined")').count();
-      expect(undefinedCount).toBe(0);
-
-      // Student name and price should be visible
-      const cells = adminPage.locator('tbody td');
-      const cellTexts = await cells.allTextContents();
-      // None of the cells should be empty or "undefined"
-      for (const text of cellTexts) {
-        expect(text.trim()).not.toBe('undefined');
-      }
-    }
+    const orderRow = adminPage.locator('tbody tr')
+      .filter({ hasText: STUDENT_NAME })
+      .filter({ hasText: OFFER_TITLE })
+      .first();
+    await expect(orderRow).toBeVisible({ timeout: 10000 });
+    await expect(orderRow).not.toContainText('undefined');
+    await expect(orderRow).toContainText('490');
+    await expect(orderRow).toContainText(/Ожидает оплаты|Выполнен/);
 
     await adminCtx.close();
   });
@@ -97,85 +192,59 @@ test.describe('QA Bug 4: Commerce data renders correctly', () => {
 
 test.describe('QA Bug 5: Payment confirmation works', () => {
   test('admin can confirm payment without Internal Server Error', async ({ browser }) => {
-    const { platformCourseId } = fixtures;
-
-    // Setup: ensure a purchase request exists and order is created
-    const studentCtx = await browser.newContext({ storageState: '.auth/student.json' });
-    const studentPage = await studentCtx.newPage();
+    const { platformCourseId, offerId } = fixtures;
+    const { context: studentCtx, page: studentPage, loginCode } = await createFreshStudentPage(browser, 'commerce-payment');
     await studentPage.goto(`/student/courses/${platformCourseId}`);
-    await studentPage.waitForTimeout(2000);
-
-    // Try to create purchase request if possible
-    const purchaseBtn = studentPage.getByRole('button', { name: /Оставить заявку/i });
-    const canRequest = await purchaseBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    if (canRequest) {
-      await purchaseBtn.click();
-      await studentPage.waitForTimeout(2000);
-    }
+    await expect(studentPage.getByText('Что нельзя рассказывать в интернете')).toBeVisible({ timeout: 10000 });
+    const purchaseButton = studentPage.getByRole('button', { name: 'Оставить заявку' });
+    await expect(purchaseButton).toBeVisible();
+    const purchaseResponse = studentPage.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().includes(`/student/offers/${offerId}/purchase-requests`),
+    );
+    await purchaseButton.click();
+    expect((await purchaseResponse).ok()).toBeTruthy();
     await studentCtx.close();
 
-    // Admin: process request → create order → confirm payment
     const adminCtx = await browser.newContext({ storageState: '.auth/admin.json' });
     const adminPage = await adminCtx.newPage();
-
     await adminPage.goto('/admin/commerce');
     await expect(adminPage.getByRole('heading', { name: 'Коммерция' })).toBeVisible({ timeout: 10000 });
-
-    // Create order from request (if request exists)
-    await adminPage.getByRole('button', { name: 'Заявки' }).click();
-    await adminPage.waitForTimeout(1000);
-
-    const hasOpenRequest = await adminPage.getByText('Открыта').isVisible({ timeout: 3000 }).catch(() => false);
-    if (hasOpenRequest) {
-      await adminPage.getByRole('button', { name: 'Создать заказ' }).first().click();
-      await expect(adminPage.getByText('Создать заказ из заявки')).toBeVisible();
-      await adminPage.getByRole('button', { name: 'Подтвердить' }).click();
-      await adminPage.waitForTimeout(3000);
-      await adminPage.keyboard.press('Escape');
-    }
-
-    // Switch to Orders tab
+    const orderId = await ensureOrderForStudent(adminPage, offerId, loginCode);
     await adminPage.getByRole('button', { name: 'Заказы' }).click();
-    await adminPage.waitForTimeout(1000);
+    const orderRow = adminPage.locator('tbody tr')
+      .filter({ hasText: loginCode })
+      .filter({ hasText: OFFER_TITLE })
+      .first();
+    await expect(orderRow).toBeVisible({ timeout: 10000 });
+    await expect(orderRow.getByText('Ожидает оплаты')).toBeVisible({ timeout: 10000 });
+    await orderRow.click();
+    await expect(adminPage.getByRole('button', { name: /Подтвердить оплату/ })).toBeVisible();
+    await adminPage.getByPlaceholder(/ID транзакции/i).fill('e2e-payment-test-001');
 
-    const hasOrder = await adminPage.getByText('Ожидает оплаты').isVisible({ timeout: 5000 }).catch(() => false);
-    if (hasOrder) {
-      // Open order detail
-      await adminPage.locator('tbody tr').first().click();
-      await expect(adminPage.getByRole('button', { name: /Подтвердить оплату/ })).toBeVisible();
+    const confirmRequestPromise = adminPage.waitForRequest(
+      req => req.url().includes(`/commerce/orders/${orderId}/payments/manual-confirm`) && req.method() === 'POST',
+    );
+    const confirmResponse = adminPage.waitForResponse(
+      response => response.request().method() === 'POST'
+        && response.url().includes(`/commerce/orders/${orderId}/payments/manual-confirm`),
+    );
+    await adminPage.getByRole('button', { name: /Подтвердить оплату/ }).click();
 
-      // Fill confirmation form
-      await adminPage.getByPlaceholder(/ID транзакции/i).fill('e2e-payment-test-001');
+    const confirmRequest = await confirmRequestPromise;
+    const confirmBody = confirmRequest.postDataJSON();
+    expect(confirmBody.external_reference).toBe('e2e-payment-test-001');
+    expect(confirmBody.amount_minor).toBe(49000);
+    expect(confirmBody.amount_confirmed_minor).toBeUndefined();
+    expect(confirmBody.currency).toBe('RUB');
+    expect(confirmBody.paid_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(confirmBody.override_reason).toBeUndefined();
+    expect(confirmBody.override).toBeUndefined();
 
-      // Bug 5: Intercept the request to verify correct field names
-      const confirmRequestPromise = adminPage.waitForRequest(
-        req => req.url().includes('/manual-confirm') && req.method() === 'POST',
-      );
+    expect((await confirmResponse).ok()).toBeTruthy();
 
-      await adminPage.getByRole('button', { name: /Подтвердить оплату/ }).click();
-
-      const confirmRequest = await confirmRequestPromise;
-      const confirmBody = confirmRequest.postDataJSON();
-
-      // Bug 5: MUST send 'amount_minor', NOT 'amount_confirmed_minor'
-      expect(confirmBody.amount_minor).toBeDefined();
-      expect(confirmBody.amount_confirmed_minor).toBeUndefined();
-      // MUST send 'currency'
-      expect(confirmBody.currency).toBeTruthy();
-      // MUST send 'paid_at' in RFC3339
-      expect(confirmBody.paid_at).toBeTruthy();
-      expect(confirmBody.paid_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      // 'override_reason' at top level must NOT exist (should be nested override.reason)
-      expect(confirmBody.override_reason).toBeUndefined();
-
-      // Should NOT see error after confirmation
-      const errorVisible = await adminPage.getByText(/Ошибка|Internal Server Error|500|400/i)
-        .isVisible({ timeout: 5000 }).catch(() => false);
-      expect(errorVisible).toBeFalsy();
-
-      // Should see order status change to "Выполнен"
-      await expect(adminPage.getByText('Выполнен')).toBeVisible({ timeout: 5000 });
-    }
+    await expect(orderRow.getByText('Выполнен')).toBeVisible({ timeout: 10000 });
+    await expect(adminPage.getByText(/Ошибка|Internal Server Error|500|400/i)).not.toBeVisible();
 
     await adminCtx.close();
   });
@@ -189,44 +258,27 @@ test.describe('QA Bug 6: Offer update preserves currency', () => {
     await page.goto('/admin/commerce');
     await expect(page.getByRole('heading', { name: 'Коммерция' })).toBeVisible({ timeout: 10000 });
 
-    // Find the seeded offer and click Edit
     await page.getByRole('button', { name: /Изменить/ }).first().click();
-
-    // Edit modal should open
     await expect(page.getByText('Редактировать оффер')).toBeVisible({ timeout: 5000 });
 
-    // Bug 6: Frontend must send price_currency in update
-    // Find the title input in the modal and change it
     const modal = page.locator('[class*="modal"]').filter({ hasText: 'Редактировать оффер' });
     const inputs = modal.locator('input');
     const titleInput = inputs.first();
     await titleInput.clear();
     await titleInput.fill('Урок: Персональные данные (обновлён)');
 
-    // Intercept update request to verify price_currency is sent
-    let capturedUpdateBody: Record<string, unknown> | null = null;
-    page.on('request', req => {
-      if (req.url().includes('/commerce/offers/') && req.method() === 'PUT') {
-        try { capturedUpdateBody = req.postDataJSON(); } catch { /* ignore */ }
-      }
-    });
-
-    // Click Сохранить inside the modal
+    const updateRequest = page.waitForRequest((req) =>
+      req.url().includes('/commerce/offers/') && req.method() === 'PUT',
+    );
+    const updateResponse = page.waitForResponse((response) =>
+      response.request().method() === 'PUT' && response.url().includes('/commerce/offers/'),
+    );
     await modal.getByRole('button', { name: /Сохранить/ }).click();
-    await page.waitForTimeout(2000);
-
-    // Bug 6: Verify request body includes price_currency
-    if (capturedUpdateBody) {
-      expect(capturedUpdateBody.price_currency).toBeTruthy();
-      expect(capturedUpdateBody.price_currency).toBe('RUB');
-      expect((capturedUpdateBody.price_amount_minor as number)).toBeGreaterThan(0);
-    }
-
-    // Verify no error
-    const hasError = await page.getByText(/Ошибка/i).isVisible({ timeout: 3000 }).catch(() => false);
-    expect(hasError).toBeFalsy();
-
-    // Verify offer table still shows price (490) — not 0 or empty
+    const capturedUpdateBody = (await updateRequest).postDataJSON() as Record<string, unknown>;
+    expect(capturedUpdateBody.price_currency).toBe('RUB');
+    expect((capturedUpdateBody.price_amount_minor as number)).toBeGreaterThan(0);
+    expect((await updateResponse).ok()).toBeTruthy();
+    await expect(page.getByText(/Ошибка/i)).not.toBeVisible();
     await expect(page.getByText('490')).toBeVisible({ timeout: 5000 });
 
     await adminCtx.close();

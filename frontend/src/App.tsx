@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import type { Role } from './api/types';
 import { Suspense, lazy, type ReactNode } from 'react';
@@ -68,33 +68,44 @@ function PageLoader() {
 /* ===== Route guards ===== */
 function RequireAuth({ children }: { children: ReactNode }) {
   const { loading, session } = useAuth();
+  const location = useLocation();
   if (loading) return <PageLoader />;
-  if (!session?.authenticated) return <Navigate to="/auth" replace />;
+  if (!session?.authenticated) return <Navigate to={`/auth?return_to=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
   return <>{children}</>;
 }
 
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { loading, session } = useAuth();
+  const location = useLocation();
   if (loading) return <PageLoader />;
-  if (!session?.authenticated) return <Navigate to="/auth" replace />;
-  if (session.onboarding.role_selection_required) return <Navigate to="/role-select" replace />;
+  if (!session?.authenticated) return <Navigate to={`/auth?return_to=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
+  if (session.onboarding.role_selection_required) {
+    return <Navigate to={`/role-select?return_to=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
+  }
   if (session.user?.role !== role) return <Navigate to={roleHome(session.user!.role)} replace />;
   return <>{children}</>;
 }
 
 function RequireUnselected({ children }: { children: ReactNode }) {
   const { loading, session } = useAuth();
+  const location = useLocation();
   if (loading) return <PageLoader />;
-  if (!session?.authenticated) return <Navigate to="/auth" replace />;
+  if (!session?.authenticated) return <Navigate to={`/auth?return_to=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
   if (!session.onboarding.role_selection_required) return <Navigate to={roleHome(session.user!.role)} replace />;
   return <>{children}</>;
 }
 
 function AuthRedirect() {
   const { loading, session } = useAuth();
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const returnTo = params.get('return_to');
   if (loading) return <PageLoader />;
   if (session?.authenticated) {
-    if (session.onboarding.role_selection_required) return <Navigate to="/role-select" replace />;
+    if (session.onboarding.role_selection_required) {
+      const destination = returnTo ? `/role-select?return_to=${encodeURIComponent(returnTo)}` : '/role-select';
+      return <Navigate to={destination} replace />;
+    }
     if (session.user?.role === 'teacher' && session.onboarding.teacher_profile_required) return <Navigate to="/teacher-onboarding" replace />;
     return <Navigate to={roleHome(session.user!.role)} replace />;
   }
@@ -138,7 +149,7 @@ export default function App() {
             </Route>
 
             <Route path="/role-select" element={
-              <RequireUnselected><RoleSelect /></RequireUnselected>
+              <RequireAuth><RoleSelect /></RequireAuth>
             } />
 
             <Route path="/student-onboarding" element={

@@ -1,46 +1,42 @@
 import { test, expect } from '@playwright/test';
+import { fixtures } from '../../helpers/fixtures';
 
 test.use({ storageState: '.auth/teacher.json' });
 
 test.describe('Teacher: Access links', () => {
   test('can view and create access links for a published course', async ({ page }) => {
-    await page.goto('/teacher');
+    const { teacherCourseId } = fixtures;
+    await page.goto(`/teacher/courses/${teacherCourseId}`);
 
-    // Navigate to "Покупки онлайн" course
-    await page.getByText('Покупки онлайн').click();
-    await page.waitForURL(/\/teacher\/courses\/.+/);
-
-    // Click "Поделиться" button to open share modal
     await page.getByRole('button', { name: 'Поделиться' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Поделиться курсом' });
+    await expect(dialog).toBeVisible();
 
-    // Should see "Поделиться курсом" modal
-    // CourseConstructor.tsx: Modal title="Поделиться курсом"
-    await expect(page.getByText('Поделиться курсом')).toBeVisible();
-
-    // Should see explanation text
-    // CourseConstructor.tsx: <p>Создайте ссылку для приглашения учеников в курс.</p>
     await expect(
-      page.getByText(/Создайте ссылку для приглашения учеников/),
+      dialog.getByText(/Создайте ссылку для приглашения учеников/),
     ).toBeVisible();
 
-    // The seed already created an access link, so it should be visible
-    // Check for existing link URL or create a new one
-    const existingLinks = page.locator('[class*="linkUrl"]');
-    const linkCount = await existingLinks.count();
+    const existingLink = dialog.getByText(/\/claim\/course-link#token=/).first();
+    await expect(existingLink).toBeVisible();
+    await expect(existingLink).not.toContainText('Ссылка недоступна');
+    await expect(dialog.getByRole('button', { name: 'Копировать' }).first()).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Отозвать' }).first()).toBeVisible();
 
-    if (linkCount > 0) {
-      // Existing link should have "Копировать" and "Отозвать" buttons
-      await expect(page.getByRole('button', { name: 'Копировать' }).first()).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Отозвать' }).first()).toBeVisible();
-    }
+    const beforeCreateCount = await dialog.getByText(/\/claim\/course-link#token=/).count();
+    const createResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().includes(`/teacher/courses/${teacherCourseId}/access-links`),
+    );
+    await dialog.getByRole('button', { name: /Создать ссылку/i }).click();
+    expect((await createResponse).ok()).toBeTruthy();
 
-    // Create a new link
-    await page.getByRole('button', { name: /Создать ссылку/ }).click();
+    await expect(dialog.getByText(/\/claim\/course-link#token=/)).toHaveCount(beforeCreateCount + 1);
 
-    // New link should appear in the list
-    await expect(page.getByRole('button', { name: 'Копировать' }).first()).toBeVisible();
-
-    // Should be able to revoke a link
-    await expect(page.getByRole('button', { name: 'Отозвать' }).first()).toBeVisible();
+    await page.reload();
+    await page.getByRole('button', { name: 'Поделиться' }).click();
+    const reopenedDialog = page.getByRole('dialog', { name: 'Поделиться курсом' });
+    await expect(reopenedDialog.getByText(/\/claim\/course-link#token=/)).toHaveCount(beforeCreateCount + 1);
+    await expect(reopenedDialog.getByRole('button', { name: 'Копировать' }).first()).toBeVisible();
+    await expect(reopenedDialog.getByRole('button', { name: 'Отозвать' }).first()).toBeVisible();
   });
 });
