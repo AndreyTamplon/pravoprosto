@@ -14,6 +14,7 @@ import {
 import { graphToBackendFormat, isBackendLessonGraph } from '../../api/types';
 import type { CourseDraft, ContentModule, ContentLesson, ReviewStatus, AccessLink } from '../../api/types';
 import { Button, ComicPanel, Badge, Spinner, Modal, Input, Textarea } from '../../components/ui';
+import { getDraftValidationErrors, parseOptionalInteger, validateAgeRange } from '../../utils/editorErrors';
 import s from './CourseConstructor.module.css';
 
 function generateId(): string {
@@ -70,8 +71,8 @@ export default function CourseConstructor() {
   // Local editable state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [ageMin, setAgeMin] = useState<number | ''>('');
-  const [ageMax, setAgeMax] = useState<number | ''>('');
+  const [ageMin, setAgeMin] = useState('');
+  const [ageMax, setAgeMax] = useState('');
   const [modules, setModules] = useState<ContentModule[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -82,6 +83,7 @@ export default function CourseConstructor() {
   const [submitting, setSubmitting] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [confirmAction, setConfirmAction] = useState<{ type: string; message: string; onConfirm: () => void } | null>(null);
 
   // Share modal
@@ -94,8 +96,8 @@ export default function CourseConstructor() {
     if (draft) {
       setTitle(draft.title);
       setDescription(draft.description);
-      setAgeMin(draft.age_min ?? '');
-      setAgeMax(draft.age_max ?? '');
+      setAgeMin(draft.age_min?.toString() ?? '');
+      setAgeMax(draft.age_max?.toString() ?? '');
       setModules(draft.content_json?.modules ?? []);
       setDraftVersion(draft.draft_version);
     }
@@ -106,12 +108,16 @@ export default function CourseConstructor() {
       throw new Error('Курс не найден');
     }
 
+    const parsedAgeMin = parseOptionalInteger('Возраст от', ageMin);
+    const parsedAgeMax = parseOptionalInteger('Возраст до', ageMax);
+    validateAgeRange(parsedAgeMin, parsedAgeMax);
+
     const res = await updateTeacherDraft(courseId, {
       draft_version: draftVersion,
       title,
       description,
-      age_min: ageMin === '' ? undefined : ageMin,
-      age_max: ageMax === '' ? undefined : ageMax,
+      age_min: parsedAgeMin,
+      age_max: parsedAgeMax,
       cover_asset_id: draft?.cover_asset_id,
       content_json: { modules: serializeModules(modules) },
     });
@@ -128,10 +134,14 @@ export default function CourseConstructor() {
     setSaving(true);
     setError(null);
     setSaved(false);
+    setValidationErrors([]);
     try {
       await saveCurrentDraft(true);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+      const message = err instanceof Error ? err.message : 'Ошибка сохранения';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setError(details.length > 0 ? null : message);
     } finally {
       setSaving(false);
     }
@@ -140,13 +150,17 @@ export default function CourseConstructor() {
   const doSubmit = useCallback(async () => {
     setSubmitting(true);
     setError(null);
+    setValidationErrors([]);
     try {
       await saveCurrentDraft();
       await submitTeacherReview(courseId!);
       reload();
       reloadReview();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Ошибка отправки');
+      const message = err instanceof Error ? err.message : 'Ошибка отправки';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setError(details.length > 0 ? null : message);
     } finally {
       setSubmitting(false);
     }
@@ -162,6 +176,7 @@ export default function CourseConstructor() {
 
   const doArchive = useCallback(async () => {
     setArchiving(true);
+    setValidationErrors([]);
     try {
       await archiveTeacherCourse(courseId!);
       navigate('/teacher');
@@ -259,6 +274,7 @@ export default function CourseConstructor() {
   const handleCreateLink = useCallback(async () => {
     setCreatingLink(true);
     setError(null);
+    setValidationErrors([]);
     try {
       await createTeacherAccessLink(courseId!);
       reloadLinks();
@@ -299,11 +315,13 @@ export default function CourseConstructor() {
 
     setSaving(true);
     setSaved(false);
+    setValidationErrors([]);
     try {
       await saveCurrentDraft();
       navigate(`/teacher/courses/${courseId}/lessons/${lessonId}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+      setValidationErrors(getDraftValidationErrors(err).map(item => item.message));
     } finally {
       setSaving(false);
     }
@@ -364,6 +382,16 @@ export default function CourseConstructor() {
       </ComicPanel>
 
       {error && <div className={s.error} style={{ marginBottom: 16 }}>{error}</div>}
+      {validationErrors.length > 0 && (
+        <div className={s.error} style={{ marginBottom: 16 }}>
+          <div>Что нужно исправить:</div>
+          <ul style={{ margin: '8px 0 0 20px' }}>
+            {validationErrors.map(item => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Metadata */}
       <ComicPanel size="sm" className={s.metaSection}>
@@ -382,10 +410,12 @@ export default function CourseConstructor() {
                 label="Возраст от"
                 type="number"
                 value={ageMin}
-                onChange={e => setAgeMin(e.target.value ? Number(e.target.value) : '')}
+                onChange={e => setAgeMin(e.target.value === '' ? '' : e.target.value)}
                 placeholder="6"
                 min={1}
                 max={99}
+                step={1}
+                inputMode="numeric"
                 disabled={!isEditable}
               />
             </div>
@@ -394,10 +424,12 @@ export default function CourseConstructor() {
                 label="Возраст до"
                 type="number"
                 value={ageMax}
-                onChange={e => setAgeMax(e.target.value ? Number(e.target.value) : '')}
+                onChange={e => setAgeMax(e.target.value === '' ? '' : e.target.value)}
                 placeholder="18"
                 min={1}
                 max={99}
+                step={1}
+                inputMode="numeric"
                 disabled={!isEditable}
               />
             </div>

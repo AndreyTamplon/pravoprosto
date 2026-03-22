@@ -35,6 +35,21 @@ type Dependencies struct {
 	Commerce      *commerce.Service
 }
 
+func writeDraftValidationFailure(w http.ResponseWriter, err error) bool {
+	var validationFailure courses.DraftValidationFailure
+	if !errors.As(err, &validationFailure) {
+		return false
+	}
+	writeError(
+		w,
+		http.StatusUnprocessableEntity,
+		"draft_validation_failed",
+		"Draft contains validation errors",
+		map[string]any{"errors": validationFailure.Validation.Errors},
+	)
+	return true
+}
+
 func NewRouter(deps Dependencies) http.Handler {
 	router := chi.NewRouter()
 	router.Use(limitRequestBody(deps.Config.MaxRequestBodyBytes))
@@ -641,10 +656,13 @@ func NewRouter(deps Dependencies) http.Handler {
 					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
 					return
 				}
-				view, err := deps.Courses.StartPreview(r.Context(), "teacher", session.AccountID, chi.URLParam(r, "courseID"), input.LessonID)
+				view, err := deps.Courses.StartPreview(r.Context(), "teacher", session.AccountID, chi.URLParam(r, "courseID"), input.LessonID, input.ReturnPath)
 				if err != nil {
 					switch err {
 					case courses.ErrDraftValidationFailed:
+						if writeDraftValidationFailure(w, err) {
+							return
+						}
 						writeError(w, http.StatusUnprocessableEntity, "draft_validation_failed", "Draft contains validation errors", nil)
 					case courses.ErrCourseNotFound:
 						writeError(w, http.StatusNotFound, "course_not_found", "Course not found", nil)
@@ -663,6 +681,9 @@ func NewRouter(deps Dependencies) http.Handler {
 					case courses.ErrModerationReviewAlreadyPending:
 						writeError(w, http.StatusConflict, "moderation_review_already_pending", "Review already pending", nil)
 					case courses.ErrDraftValidationFailed:
+						if writeDraftValidationFailure(w, err) {
+							return
+						}
 						writeError(w, http.StatusUnprocessableEntity, "draft_validation_failed", "Draft contains validation errors", nil)
 					case courses.ErrCourseNotFound:
 						writeError(w, http.StatusNotFound, "course_not_found", "Course not found", nil)
@@ -857,10 +878,13 @@ func NewRouter(deps Dependencies) http.Handler {
 					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
 					return
 				}
-				view, err := deps.Courses.StartPreview(r.Context(), "admin", session.AccountID, chi.URLParam(r, "courseID"), input.LessonID)
+				view, err := deps.Courses.StartPreview(r.Context(), "admin", session.AccountID, chi.URLParam(r, "courseID"), input.LessonID, input.ReturnPath)
 				if err != nil {
 					switch err {
 					case courses.ErrDraftValidationFailed:
+						if writeDraftValidationFailure(w, err) {
+							return
+						}
 						writeError(w, http.StatusUnprocessableEntity, "draft_validation_failed", "Draft contains validation errors", nil)
 					case courses.ErrCourseNotFound:
 						writeError(w, http.StatusNotFound, "course_not_found", "Course not found", nil)
@@ -966,12 +990,15 @@ func NewRouter(deps Dependencies) http.Handler {
 					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
 					return
 				}
-				view, err := deps.Courses.StartModerationPreview(r.Context(), session.AccountID, chi.URLParam(r, "reviewID"), input.LessonID)
+				view, err := deps.Courses.StartModerationPreview(r.Context(), session.AccountID, chi.URLParam(r, "reviewID"), input.LessonID, input.ReturnPath)
 				if err != nil {
 					switch err {
 					case courses.ErrReviewNotFound:
 						writeError(w, http.StatusNotFound, "review_not_found", "Review not found", nil)
 					case courses.ErrDraftValidationFailed:
+						if writeDraftValidationFailure(w, err) {
+							return
+						}
 						writeError(w, http.StatusUnprocessableEntity, "draft_validation_failed", "Draft contains validation errors", nil)
 					default:
 						writeInternalError(w)

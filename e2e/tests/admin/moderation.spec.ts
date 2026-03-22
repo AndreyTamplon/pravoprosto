@@ -11,7 +11,9 @@ async function createTeacherCourseForModeration(page: Page, courseTitle: string)
   await page.getByRole('button', { name: /\+ Модуль/i }).click();
   await page.getByPlaceholder('Название модуля...').fill('Модуль модерации');
   await page.getByRole('button', { name: /\+ Добавить этап/i }).click();
+  await expect(page.getByText('1. Этап 1')).toBeVisible({ timeout: 10000 });
   await page.getByRole('button', { name: /\+ Добавить этап/i }).click();
+  await expect(page.getByText('2. Этап 2')).toBeVisible({ timeout: 10000 });
 
   await page.getByRole('button', { name: 'Редактировать' }).nth(0).click();
   await page.waitForURL(/\/teacher\/courses\/.+\/lessons\/.+/);
@@ -33,10 +35,12 @@ async function createTeacherCourseForModeration(page: Page, courseTitle: string)
 }
 
 async function fillSimpleLesson(page: Page, lessonTitle: string, storyText: string) {
+  await expect(page.getByPlaceholder('Название этапа...')).toBeVisible({ timeout: 10000 });
   await page.getByPlaceholder('Название этапа...').fill(lessonTitle);
   await page.getByRole('button', { name: /\+ Блок истории/i }).click();
-  await page.getByRole('button', { name: /\+ Завершение/i }).click();
+  await expect(page.getByLabel('Текст истории')).toBeVisible({ timeout: 10000 });
   await page.getByLabel('Текст истории').fill(storyText);
+  await page.getByRole('button', { name: /\+ Завершение/i }).click();
   const saveResponse = page.waitForResponse((response) =>
     response.request().method() === 'PUT' && response.url().includes('/draft'),
   );
@@ -66,8 +70,8 @@ test.describe('Admin: Moderation workflow and preview', () => {
 
     const lessonSelect = reviewDialog.getByLabel(/Урок для предпросмотра/i);
     await expect(lessonSelect).toBeVisible();
-    const secondLessonOption = lessonSelect.locator('option').filter({ hasText: 'Второй урок' });
-    const secondLessonValue = await secondLessonOption.first().getAttribute('value');
+    const secondLessonOption = lessonSelect.locator('option').nth(1);
+    const secondLessonValue = await secondLessonOption.getAttribute('value');
     expect(secondLessonValue).toBeTruthy();
     await lessonSelect.selectOption(secondLessonValue!);
 
@@ -77,6 +81,11 @@ test.describe('Admin: Moderation workflow and preview', () => {
     await previewPage.waitForURL(/\/admin\/preview\/.+/);
     await previewPage.reload();
     await expect(previewPage.getByText('Содержимое второго урока для admin preview')).toBeVisible({
+      timeout: 10000,
+    });
+    await previewPage.getByRole('button', { name: 'Вернуться в редактор' }).first().click();
+    await previewPage.waitForURL(/\/admin\/moderation$/);
+    await expect(previewPage.getByRole('heading', { name: 'Модерация курсов' })).toBeVisible({
       timeout: 10000,
     });
     await previewPage.close();

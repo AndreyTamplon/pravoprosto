@@ -113,6 +113,28 @@
   align-items: center;
 }
 
+.correctToggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: var(--border-thin);
+  background: var(--white);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.correctToggleActive {
+  background: var(--lime);
+  border-color: var(--lime-dark, #65a30d);
+  color: var(--white);
+}
+
 .optionRow > input {
   flex: 1;
 }

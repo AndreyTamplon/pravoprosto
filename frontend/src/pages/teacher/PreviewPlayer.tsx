@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { getPreviewSession, previewNext, previewAnswer } from '../../api/client';
 import type { PreviewAnswerView, PreviewStepView } from '../../api/types';
@@ -9,6 +9,8 @@ import s from './PreviewPlayer.module.css';
 export default function PreviewPlayer() {
   const { previewSessionId } = useParams<{ previewSessionId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   const { data: initialSession, loading, error: loadError } = useApi(
     () => getPreviewSession(previewSessionId!),
@@ -30,6 +32,19 @@ export default function PreviewPlayer() {
     setCompleted(false);
     setAnswerResult(null);
   }, [initialSession]);
+
+  const handleReturnToEditor = useCallback(() => {
+    const returnPath = initialSession?.return_path ?? searchParams.get('return_to') ?? undefined;
+    if (returnPath) {
+      navigate(returnPath);
+      return;
+    }
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate(location.pathname.startsWith('/admin/') ? '/admin' : '/teacher');
+  }, [initialSession?.return_path, location.pathname, navigate, searchParams]);
 
   const resetTransientState = useCallback(() => {
     setAnswerResult(null);
@@ -97,7 +112,7 @@ export default function PreviewPlayer() {
   const isChoice = currentStep?.node_kind === 'single_choice';
   const isFreeText = currentStep?.node_kind === 'free_text';
   const isEnd = currentStep?.node_kind === 'end';
-  const progressPct = currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
+  const progressPct = completed ? 100 : currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
 
   const payload = currentStep?.payload ?? {};
   const storyText = (payload.text as string) ?? '';
@@ -112,7 +127,7 @@ export default function PreviewPlayer() {
           <span className={s.previewBadge}>Предпросмотр</span>
           <span className={s.bannerText}>Режим предпросмотра - данные не сохраняются</span>
         </div>
-        <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
+        <Button variant="outline" size="sm" onClick={handleReturnToEditor}>
           Вернуться в редактор
         </Button>
       </div>
@@ -130,7 +145,7 @@ export default function PreviewPlayer() {
               <div className={s.completedTitle}>Миссия завершена!</div>
               <div className={s.completedSub}>Предпросмотр этапа завершён</div>
               <div className={s.actionBar}>
-                <Button onClick={() => navigate(-1)}>Вернуться в редактор</Button>
+                <Button onClick={handleReturnToEditor}>Вернуться в редактор</Button>
               </div>
             </div>
           </ComicPanel>
@@ -232,7 +247,7 @@ export default function PreviewPlayer() {
               </div>
               <div className={s.actionBar}>
                 <Button onClick={handleContinueAfterFeedback}>
-                  {answerResult.next_step?.node_kind === 'end' ? 'Завершить' : 'Далее'}
+                  {answerResult.next_step ? 'Далее' : 'Завершить предпросмотр'}
                 </Button>
               </div>
             </div>

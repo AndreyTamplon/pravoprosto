@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import {
   getModerationQueue,
@@ -18,6 +19,7 @@ interface PreviewLessonOption {
 }
 
 export default function Moderation() {
+  const location = useLocation();
   const { data, loading, error, reload } = useApi<PendingReview[]>(() => getModerationQueue(), []);
   const [selected, setSelected] = useState<PendingReview | null>(null);
   const [showReject, setShowReject] = useState(false);
@@ -108,12 +110,12 @@ export default function Moderation() {
       return;
     }
     try {
-      const session = await createModerationPreview(review.review_id, previewLessonId);
-      window.open(`/admin/preview/${session.preview_session_id}`, '_blank');
+      const session = await createModerationPreview(review.review_id, previewLessonId, location.pathname);
+      window.open(`/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`, '_blank');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
     }
-  }, [previewLessonId]);
+  }, [location.pathname, previewLessonId]);
 
   if (loading) return <Spinner />;
 

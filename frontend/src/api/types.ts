@@ -173,6 +173,7 @@ export interface PreviewStepView {
 export interface PreviewSessionView {
   preview: true;
   preview_session_id: string;
+  return_path?: string;
   step: PreviewStepView;
 }
 
@@ -399,6 +400,7 @@ export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown
     return {
       id: node.id,
       kind: 'end',
+      text: (node.data.text as string) ?? '',
     };
   });
 

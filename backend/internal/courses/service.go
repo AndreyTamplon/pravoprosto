@@ -65,6 +65,18 @@ type ValidationView struct {
 	Errors  []ValidationError `json:"errors"`
 }
 
+type DraftValidationFailure struct {
+	Validation ValidationView
+}
+
+func (e DraftValidationFailure) Error() string {
+	return ErrDraftValidationFailed.Error()
+}
+
+func (e DraftValidationFailure) Unwrap() error {
+	return ErrDraftValidationFailed
+}
+
 type CourseListView struct {
 	Items []map[string]any `json:"items"`
 }
@@ -85,12 +97,14 @@ type DraftView struct {
 }
 
 type PreviewStartInput struct {
-	LessonID string `json:"lesson_id"`
+	LessonID   string `json:"lesson_id"`
+	ReturnPath string `json:"return_path"`
 }
 
 type PreviewStepEnvelope struct {
 	Preview          bool     `json:"preview"`
 	PreviewSessionID string   `json:"preview_session_id,omitempty"`
+	ReturnPath       string   `json:"return_path,omitempty"`
 	Step             StepView `json:"step"`
 }
 
@@ -584,12 +598,12 @@ func draftAssetOwner(role string, actorID string) *string {
 	return &actorID
 }
 
-func (s *Service) StartPreview(ctx context.Context, role string, actorID string, courseID string, lessonID string) (PreviewStepEnvelope, error) {
+func (s *Service) StartPreview(ctx context.Context, role string, actorID string, courseID string, lessonID string, returnPath string) (PreviewStepEnvelope, error) {
 	draft, err := s.GetDraft(ctx, role, actorID, courseID)
 	if err != nil {
 		return PreviewStepEnvelope{}, err
 	}
-	return s.startPreviewFromDraft(role, actorID, draft, lessonID)
+	return s.startPreviewFromDraft(role, actorID, draft, lessonID, returnPath)
 }
 
 func (s *Service) ModerationDraft(ctx context.Context, reviewID string) (DraftView, error) {
@@ -600,17 +614,17 @@ func (s *Service) ModerationDraft(ctx context.Context, reviewID string) (DraftVi
 	return draft, nil
 }
 
-func (s *Service) StartModerationPreview(ctx context.Context, adminID string, reviewID string, lessonID string) (PreviewStepEnvelope, error) {
+func (s *Service) StartModerationPreview(ctx context.Context, adminID string, reviewID string, lessonID string, returnPath string) (PreviewStepEnvelope, error) {
 	draft, _, err := s.loadModerationDraft(ctx, reviewID)
 	if err != nil {
 		return PreviewStepEnvelope{}, err
 	}
-	return s.startPreviewFromDraft("admin", adminID, draft, lessonID)
+	return s.startPreviewFromDraft("admin", adminID, draft, lessonID, returnPath)
 }
 
-func (s *Service) startPreviewFromDraft(role string, actorID string, draft DraftView, lessonID string) (PreviewStepEnvelope, error) {
+func (s *Service) startPreviewFromDraft(role string, actorID string, draft DraftView, lessonID string, returnPath string) (PreviewStepEnvelope, error) {
 	if !draft.Validation.IsValid {
-		return PreviewStepEnvelope{}, ErrDraftValidationFailed
+		return PreviewStepEnvelope{}, DraftValidationFailure{Validation: draft.Validation}
 	}
 	lesson, err := findLesson(draft.Content, lessonID)
 	if err != nil {
@@ -627,6 +641,7 @@ func (s *Service) startPreviewFromDraft(role string, actorID string, draft Draft
 		OwnerID:      actorID,
 		CourseID:     draft.CourseID,
 		LessonID:     lessonID,
+		ReturnPath:   returnPath,
 		Graph:        graph,
 		CurrentID:    graph.StartNodeID,
 		StateVersion: 1,
@@ -797,7 +812,7 @@ func (s *Service) SubmitReview(ctx context.Context, teacherID string, courseID s
 		return nil, err
 	}
 	if !draft.Validation.IsValid {
-		return nil, ErrDraftValidationFailed
+		return nil, DraftValidationFailure{Validation: draft.Validation}
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {

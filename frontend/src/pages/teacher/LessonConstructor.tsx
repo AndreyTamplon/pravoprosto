@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import {
   getTeacherDraft,
@@ -9,6 +9,7 @@ import {
 import type { CourseDraft, ContentModule, GraphNode, GraphEdge, LessonGraph } from '../../api/types';
 import { graphToBackendFormat, graphFromBackendFormat, isBackendLessonGraph } from '../../api/types';
 import { Button, ComicPanel, Badge, Spinner, Textarea, Modal } from '../../components/ui';
+import { getDraftValidationErrors } from '../../utils/editorErrors';
 import s from './LessonConstructor.module.css';
 
 function genId(): string {
@@ -98,6 +99,7 @@ export default function LessonConstructor() {
     lessonId: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const { data: draft, loading, error: loadError } = useApi<CourseDraft>(
     () => getTeacherDraft(courseId!),
@@ -114,6 +116,7 @@ export default function LessonConstructor() {
   const [saved, setSaved] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
   // Find our lesson in the draft (scan all modules for lessonId)
@@ -312,6 +315,7 @@ export default function LessonConstructor() {
     setSaving(true);
     setError(null);
     setSaved(false);
+    setValidationErrors([]);
     try {
       const editorGraph: LessonGraph = {
         startNodeId: startNodeId || (nodes[0]?.id ?? ''),
@@ -346,7 +350,9 @@ export default function LessonConstructor() {
       return result.draft_version;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Ошибка сохранения';
-      setError(message);
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setError(details.length > 0 ? null : message);
       throw err instanceof Error ? err : new Error(message);
     } finally {
       setSaving(false);
@@ -357,16 +363,20 @@ export default function LessonConstructor() {
   const handlePreview = useCallback(async () => {
     // Save first, then create preview session
     setPreviewing(true);
+    setValidationErrors([]);
     try {
       await handleSave();
-      const session = await createTeacherPreview(courseId!, lessonId!);
-      navigate(`/teacher/preview/${session.preview_session_id}`);
+      const session = await createTeacherPreview(courseId!, lessonId!, location.pathname);
+      navigate(`/teacher/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
+      const message = err instanceof Error ? err.message : 'Ошибка предпросмотра';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setError(details.length > 0 ? null : message);
     } finally {
       setPreviewing(false);
     }
-  }, [courseId, lessonId, handleSave, navigate]);
+  }, [courseId, handleSave, lessonId, location.pathname, navigate]);
 
   if (loading) return <Spinner text="Загрузка этапа..." />;
   if (loadError) return <div className={s.error}>{loadError}</div>;
@@ -404,6 +414,16 @@ export default function LessonConstructor() {
       </ComicPanel>
 
       {error && <div className={s.error}>{error}</div>}
+      {validationErrors.length > 0 && (
+        <div className={s.error}>
+          <div>Что нужно исправить:</div>
+          <ul style={{ margin: '8px 0 0 20px' }}>
+            {validationErrors.map(item => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Node list */}
       <div className={s.nodeList}>

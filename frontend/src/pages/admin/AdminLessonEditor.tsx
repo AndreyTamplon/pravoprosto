@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { getAdminDraft, updateAdminDraft, createAdminPreview } from '../../api/client';
 import { Button, Badge, Spinner, EmptyState, Input, Textarea } from '../../components/ui';
 import type { CourseDraft, GraphNode, GraphEdge, ContentModule, ContentLesson, LessonGraph } from '../../api/types';
 import { graphToBackendFormat, graphFromBackendFormat, isBackendLessonGraph } from '../../api/types';
+import { getDraftValidationErrors } from '../../utils/editorErrors';
 import styles from './AdminLessonEditor.module.css';
 
 type NodeType = 'story' | 'single_choice' | 'free_text' | 'terminal';
@@ -48,6 +49,7 @@ function generateId(): string {
 export default function AdminLessonEditor() {
   const { courseId, lessonId } = useParams<{ courseId: string; lessonId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const { data: draft, loading, error } = useApi<CourseDraft>(
     () => getAdminDraft(courseId!), [courseId],
@@ -62,6 +64,7 @@ export default function AdminLessonEditor() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   // Find moduleId by scanning all modules
   const moduleId = draft?.content_json?.modules?.find(
@@ -114,6 +117,7 @@ export default function AdminLessonEditor() {
     setSaving(true);
     setSaveError('');
     setSaveMsg('');
+    setValidationErrors([]);
     try {
       const updatedModules = (draft.content_json?.modules ?? []).map((m: ContentModule) => {
         if (m.id !== moduleId) return m;
@@ -141,7 +145,9 @@ export default function AdminLessonEditor() {
       return result.draft_version;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Ошибка сохранения';
-      setSaveError(message);
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setSaveError(details.length > 0 ? '' : message);
       throw err instanceof Error ? err : new Error(message);
     } finally {
       setSaving(false);
@@ -150,23 +156,58 @@ export default function AdminLessonEditor() {
 
   const handlePreview = useCallback(async () => {
     if (!courseId || !lessonId) return;
+    setValidationErrors([]);
     try {
       await handleSave();
-      const session = await createAdminPreview(courseId, lessonId);
-      window.open(`/admin/preview/${session.preview_session_id}`, '_blank');
+      const session = await createAdminPreview(courseId, lessonId, location.pathname);
+      window.open(`/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`, '_blank');
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
+      const message = err instanceof Error ? err.message : 'Ошибка предпросмотра';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setSaveError(details.length > 0 ? '' : message);
     }
-  }, [courseId, lessonId, handleSave]);
+  }, [courseId, handleSave, lessonId, location.pathname]);
 
   function addNode(type: NodeType) {
     const id = generateId();
     let data: Record<string, unknown> = {};
     if (type === 'story') data = { text: '', speaker: '' };
-    if (type === 'single_choice') data = { question_text: '', options: [{ option_id: generateId(), text: '', is_correct: false }] };
-    if (type === 'free_text') data = { question_text: '', reference_answer: '' };
+    if (type === 'single_choice') {
+      const firstOptionId = generateId();
+      const secondOptionId = generateId();
+      data = {
+        question_text: '',
+        options: [
+          { option_id: firstOptionId, text: '' },
+          { option_id: secondOptionId, text: '' },
+        ],
+        correct_option_id: firstOptionId,
+        feedback_correct: 'Правильно!',
+        feedback_incorrect: 'Попробуйте ещё раз.',
+      };
+    }
+    if (type === 'free_text') data = { question_text: '', reference_answer: '', criteria: '', feedback_text: '' };
+    if (type === 'terminal') data = { text: 'Миссия завершена!' };
 
     const terminalNode = nodes.find(n => n.type === 'terminal');
+    if (type === 'terminal') {
+      if (terminalNode) return;
+      const contentNodes = nodes.filter(n => n.type !== 'terminal');
+      const newTerminalNode: GraphNode = { id, type, data };
+      const rebuiltEdges = [...edges.filter(e => e.to !== id && e.from !== id)];
+      const previousContentNode = contentNodes[contentNodes.length - 1];
+      if (previousContentNode) {
+        rebuiltEdges.push({ from: previousContentNode.id, to: id });
+      }
+      setNodes([...contentNodes, newTerminalNode]);
+      setEdges(rebuiltEdges);
+      if (!startNodeId && contentNodes.length === 0) {
+        setStartNodeId(id);
+      }
+      return;
+    }
+
     const newNode: GraphNode = { id, type, data };
     const newNodes = [...nodes.filter(n => n.type !== 'terminal'), newNode, ...(terminalNode ? [terminalNode] : [])];
 
@@ -218,25 +259,38 @@ export default function AdminLessonEditor() {
   function addOption(nodeId: string) {
     setNodes(prev => prev.map(n => {
       if (n.id !== nodeId) return n;
-      const opts = (n.data.options as Array<{ option_id: string; text: string; is_correct: boolean }>) ?? [];
-      return { ...n, data: { ...n.data, options: [...opts, { option_id: generateId(), text: '', is_correct: false }] } };
+      const opts = (n.data.options as Array<{ option_id: string; text: string }>) ?? [];
+      return { ...n, data: { ...n.data, options: [...opts, { option_id: generateId(), text: '' }] } };
     }));
   }
 
-  function updateOption(nodeId: string, optionId: string, field: string, value: unknown) {
+  function updateOptionText(nodeId: string, optionId: string, text: string) {
     setNodes(prev => prev.map(n => {
       if (n.id !== nodeId) return n;
-      const opts = (n.data.options as Array<{ option_id: string; text: string; is_correct: boolean }>) ?? [];
-      return { ...n, data: { ...n.data, options: opts.map(o => o.option_id === optionId ? { ...o, [field]: value } : o) } };
+      const opts = (n.data.options as Array<{ option_id: string; text: string }>) ?? [];
+      return { ...n, data: { ...n.data, options: opts.map(o => o.option_id === optionId ? { ...o, text } : o) } };
     }));
   }
 
   function removeOption(nodeId: string, optionId: string) {
     setNodes(prev => prev.map(n => {
       if (n.id !== nodeId) return n;
-      const opts = (n.data.options as Array<{ option_id: string; text: string; is_correct: boolean }>) ?? [];
-      return { ...n, data: { ...n.data, options: opts.filter(o => o.option_id !== optionId) } };
+      const opts = (n.data.options as Array<{ option_id: string; text: string }>) ?? [];
+      const nextOptions = opts.filter(o => o.option_id !== optionId);
+      const correctOptionId = (n.data.correct_option_id as string) ?? '';
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          options: nextOptions,
+          correct_option_id: correctOptionId === optionId ? (nextOptions[0]?.option_id ?? '') : correctOptionId,
+        },
+      };
     }));
+  }
+
+  function setCorrectOption(nodeId: string, optionId: string) {
+    updateNodeData(nodeId, 'correct_option_id', optionId);
   }
 
   function getNextNodeLabel(nodeId: string): string {
@@ -264,6 +318,16 @@ export default function AdminLessonEditor() {
 
       {saveMsg && <div className={styles.saveNotice}>{saveMsg}</div>}
       {saveError && <div className={styles.error}>{saveError}</div>}
+      {validationErrors.length > 0 && (
+        <div className={styles.error}>
+          <div>Что нужно исправить:</div>
+          <ul style={{ margin: '8px 0 0 20px' }}>
+            {validationErrors.map(item => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div style={{ marginBottom: 20 }}>
         <Input label="Название урока" value={lessonTitle} onChange={e => setLessonTitle(e.target.value)} />
@@ -319,23 +383,23 @@ export default function AdminLessonEditor() {
                   />
                   <div className={styles.nodeFieldGroup}>
                     <div className={styles.nodeFieldLabel}>Варианты ответа</div>
-                    {((node.data.options as Array<{ option_id: string; text: string; is_correct: boolean }>) ?? []).map(opt => (
+                    {((node.data.options as Array<{ option_id: string; text: string }>) ?? []).map(opt => (
                       <div key={opt.option_id} className={styles.optionRow}>
+                        <button
+                          className={`${styles.correctToggle} ${((node.data.correct_option_id as string) ?? '') === opt.option_id ? styles.correctToggleActive : ''}`}
+                          onClick={() => setCorrectOption(node.id, opt.option_id)}
+                          type="button"
+                          title="Отметить правильный вариант"
+                        >
+                          {((node.data.correct_option_id as string) ?? '') === opt.option_id ? '✓' : ''}
+                        </button>
                         <input
                           className={styles.optionInput}
                           value={opt.text}
-                          onChange={e => updateOption(node.id, opt.option_id, 'text', e.target.value)}
+                          onChange={e => updateOptionText(node.id, opt.option_id, e.target.value)}
                           placeholder="Вариант ответа"
                           style={{ padding: '8px 12px', border: '2px solid #1E293B', borderRadius: 8, fontFamily: 'var(--font-family)', flex: 1 }}
                         />
-                        <label className={styles.optionCorrect}>
-                          <input
-                            type="checkbox"
-                            checked={opt.is_correct}
-                            onChange={e => updateOption(node.id, opt.option_id, 'is_correct', e.target.checked)}
-                          />
-                          Верный
-                        </label>
                         <Button size="sm" variant="ghost" onClick={() => removeOption(node.id, opt.option_id)}>
                           &times;
                         </Button>
@@ -343,6 +407,20 @@ export default function AdminLessonEditor() {
                     ))}
                     <Button size="sm" variant="secondary" onClick={() => addOption(node.id)}>+ Вариант</Button>
                   </div>
+                  <Textarea
+                    label="Обратная связь (правильно)"
+                    value={(node.data.feedback_correct as string) ?? ''}
+                    onChange={e => updateNodeData(node.id, 'feedback_correct', e.target.value)}
+                    placeholder="Что увидит ученик при правильном ответе"
+                    rows={2}
+                  />
+                  <Textarea
+                    label="Обратная связь (неправильно)"
+                    value={(node.data.feedback_incorrect as string) ?? ''}
+                    onChange={e => updateNodeData(node.id, 'feedback_incorrect', e.target.value)}
+                    placeholder="Что увидит ученик при неправильном ответе"
+                    rows={2}
+                  />
                 </>
               )}
 
@@ -361,13 +439,24 @@ export default function AdminLessonEditor() {
                     onChange={e => updateNodeData(node.id, 'reference_answer', e.target.value)}
                     placeholder="Правильный ответ"
                   />
+                  <Textarea
+                    label="Критерии оценивания"
+                    value={(node.data.criteria as string) ?? ''}
+                    onChange={e => updateNodeData(node.id, 'criteria', e.target.value)}
+                    placeholder="На что ориентироваться при оценке ответа"
+                    rows={2}
+                  />
                 </>
               )}
 
               {node.type === 'terminal' && (
-                <div style={{ color: 'var(--gray-500)', fontWeight: 600, textAlign: 'center' }}>
-                  Конечная нода -- урок завершается здесь
-                </div>
+                <Textarea
+                  label="Текст завершения"
+                  value={(node.data.text as string) ?? ''}
+                  onChange={e => updateNodeData(node.id, 'text', e.target.value)}
+                  placeholder="Сообщение в конце урока"
+                  rows={2}
+                />
               )}
             </div>
 
@@ -384,6 +473,7 @@ export default function AdminLessonEditor() {
         <Button size="sm" variant="secondary" onClick={() => addNode('story')}>📖 История</Button>
         <Button size="sm" variant="secondary" onClick={() => addNode('single_choice')}>🔘 Выбор ответа</Button>
         <Button size="sm" variant="secondary" onClick={() => addNode('free_text')}>✏️ Свободный ответ</Button>
+        <Button size="sm" variant="secondary" onClick={() => addNode('terminal')}>🏁 Конец</Button>
       </div>
     </div>
   );

@@ -64,4 +64,35 @@ test.describe('QA: Admin course create/save/publish flow', () => {
 
     await adminCtx.close();
   });
+
+  test('admin sees a friendly Russian validation error for fractional age values', async ({ browser }) => {
+    const adminCtx = await browser.newContext({ storageState: '.auth/admin.json' });
+    const page = await adminCtx.newPage();
+    const courseTitle = `QA Age Error ${Date.now()}`;
+    let draftRequestSent = false;
+
+    page.on('request', (request) => {
+      if (request.method() === 'PUT' && request.url().includes('/draft')) {
+        draftRequestSent = true;
+      }
+    });
+
+    await page.goto('/admin/courses');
+    await page.getByRole('button', { name: /Создать курс/i }).click();
+    const createDialog = page.getByRole('dialog', { name: 'Создать курс' });
+    await createDialog.getByLabel('Название').fill(courseTitle);
+    await createDialog.getByLabel('Описание').fill('Курс для проверки ошибок возраста');
+    await createDialog.getByRole('button', { name: 'Создать', exact: true }).click();
+
+    await page.waitForURL(/\/admin\/courses\/[^/]+$/);
+    await page.getByLabel('Возраст от').fill('1.2');
+    await page.getByLabel('Возраст до').fill('12.2');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+
+    await expect(page.getByText('Поле «Возраст от» должно быть целым числом.')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Invalid JSON body|Draft contains validation errors/i)).not.toBeVisible();
+    await expect.poll(() => draftRequestSent, { timeout: 1000 }).toBe(false);
+
+    await adminCtx.close();
+  });
 });

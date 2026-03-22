@@ -45,6 +45,7 @@ type previewSession struct {
 	OwnerID      string
 	CourseID     string
 	LessonID     string
+	ReturnPath   string
 	Graph        lessonGraph
 	CurrentID    string
 	StateVersion int64
@@ -159,7 +160,7 @@ func buildStepView(sessionID string, courseID string, lessonID string, stateVers
 	completed := 0
 	for index, nodeID := range graph.Order {
 		if nodeID == currentID {
-			completed = index
+			completed = index + 1
 			break
 		}
 	}
@@ -220,6 +221,7 @@ func buildPreviewEnvelope(session *previewSession) PreviewStepEnvelope {
 	return PreviewStepEnvelope{
 		Preview:          true,
 		PreviewSessionID: session.ID,
+		ReturnPath:       session.ReturnPath,
 		Step:             buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, node),
 	}
 }

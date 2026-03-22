@@ -20,15 +20,64 @@ export class ApiRequestError extends Error {
   }
 }
 
+function translateApiMessage(status: number, code: string, message: string): string {
+  if (code === 'bad_request' && message === 'Invalid JSON body') {
+    return 'Форма содержит некорректные данные.';
+  }
+  if (code === 'bad_request' && message === 'Missing external_reference') {
+    return 'Укажите внешний идентификатор оплаты.';
+  }
+  if (code === 'draft_validation_failed') {
+    return 'Черновик содержит ошибки валидации.';
+  }
+  if (code === 'draft_version_conflict') {
+    return 'Черновик был изменён в другой вкладке. Обновите страницу и повторите попытку.';
+  }
+  if (code === 'course_not_found') {
+    return 'Курс не найден.';
+  }
+  if (code === 'review_not_found') {
+    return 'Проверка не найдена.';
+  }
+  if (code === 'preview_session_not_found') {
+    return 'Сессия предпросмотра не найдена или уже истекла.';
+  }
+  if (code === 'preview_session_state_conflict') {
+    return 'Состояние предпросмотра устарело. Обновите страницу и попробуйте снова.';
+  }
+  if (code === 'invalid_preview_action') {
+    return 'Это действие недоступно для текущего шага предпросмотра.';
+  }
+  if (code === 'llm_temporarily_unavailable') {
+    return 'Проверка ответа временно недоступна. Попробуйте позже.';
+  }
+  if (code === 'manual_payment_mismatch') {
+    return 'Сумма или валюта оплаты не совпадают с заказом. Укажите причину вручную.';
+  }
+  if (code === 'forbidden') {
+    return 'Недостаточно прав для этого действия.';
+  }
+  if (status >= 500 && message === 'Internal server error') {
+    return 'Внутренняя ошибка сервера.';
+  }
+  return message;
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const err = body as ApiError | null;
+    const code = err?.error?.code ?? 'unknown';
+    const message = translateApiMessage(
+      res.status,
+      code,
+      err?.error?.message ?? `HTTP ${res.status}`,
+    );
     throw new ApiRequestError(
       res.status,
-      err?.error?.code ?? 'unknown',
-      err?.error?.message ?? `HTTP ${res.status}`,
+      code,
+      message,
       err?.error?.details ?? undefined,
     );
   }
@@ -111,6 +160,7 @@ function normalizePreviewSession(raw: Record<string, unknown>): import('./types'
   return {
     preview: true,
     preview_session_id: (raw.preview_session_id ?? step.session_id ?? '') as string,
+    return_path: (raw.return_path as string) ?? undefined,
     step,
   };
 }
@@ -296,8 +346,12 @@ export const getTeacherReviewStatus = async (courseId: string): Promise<import('
     resolved_at: (current.resolved_at as string) ?? undefined,
   };
 };
-export const createTeacherPreview = async (courseId: string, lessonId: string): Promise<import('./types').PreviewSessionView> => {
-  const raw = await post<Record<string, unknown>>(`/teacher/courses/${courseId}/preview`, { lesson_id: lessonId });
+export const createTeacherPreview = async (
+  courseId: string,
+  lessonId: string,
+  returnPath?: string,
+): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/teacher/courses/${courseId}/preview`, { lesson_id: lessonId, return_path: returnPath });
   return normalizePreviewSession(raw);
 };
 export const createTeacherAccessLink = async (courseId: string): Promise<import('./types').AccessLink> => {
@@ -374,12 +428,20 @@ export const getModerationReviewDraft = async (reviewId: string): Promise<import
 export const updateAdminDraft = (courseId: string, data: import('./types').UpdateDraftInput) =>
   put<{ draft_version: number }>(`/admin/courses/${courseId}/draft`, buildDraftBody(data));
 export const publishAdminCourse = (courseId: string) => post<void>(`/admin/courses/${courseId}/publish`);
-export const createAdminPreview = async (courseId: string, lessonId: string): Promise<import('./types').PreviewSessionView> => {
-  const raw = await post<Record<string, unknown>>(`/admin/courses/${courseId}/preview`, { lesson_id: lessonId });
+export const createAdminPreview = async (
+  courseId: string,
+  lessonId: string,
+  returnPath?: string,
+): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/admin/courses/${courseId}/preview`, { lesson_id: lessonId, return_path: returnPath });
   return normalizePreviewSession(raw);
 };
-export const createModerationPreview = async (reviewId: string, lessonId: string): Promise<import('./types').PreviewSessionView> => {
-  const raw = await post<Record<string, unknown>>(`/admin/moderation/reviews/${reviewId}/preview`, { lesson_id: lessonId });
+export const createModerationPreview = async (
+  reviewId: string,
+  lessonId: string,
+  returnPath?: string,
+): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/admin/moderation/reviews/${reviewId}/preview`, { lesson_id: lessonId, return_path: returnPath });
   return normalizePreviewSession(raw);
 };
 export const createAdminAccessGrant = (courseId: string, studentId: string) => post<void>(`/admin/courses/${courseId}/access-grants`, { student_id: studentId });

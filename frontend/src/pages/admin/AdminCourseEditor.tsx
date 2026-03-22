@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import {
   getAdminDraft, updateAdminDraft, publishAdminCourse, createAdminPreview,
@@ -7,6 +7,11 @@ import {
 import { Button, Badge, Spinner, Modal, Input, EmptyState } from '../../components/ui';
 import { graphToBackendFormat, isBackendLessonGraph } from '../../api/types';
 import type { CourseDraft, ContentModule, ContentLesson, LessonGraph } from '../../api/types';
+import {
+  getDraftValidationErrors,
+  parseOptionalInteger,
+  validateAgeRange,
+} from '../../utils/editorErrors';
 import styles from './AdminCourseEditor.module.css';
 
 function emptyGraph(): LessonGraph {
@@ -33,6 +38,7 @@ function serializeModules(modules: ContentModule[]): ContentModule[] {
 export default function AdminCourseEditor() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: draft, loading, error, reload } = useApi<CourseDraft>(
     () => getAdminDraft(courseId!), [courseId],
   );
@@ -48,6 +54,7 @@ export default function AdminCourseEditor() {
   const [publishing, setPublishing] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   // Module/Lesson modals
   const [showAddModule, setShowAddModule] = useState(false);
@@ -78,12 +85,16 @@ export default function AdminCourseEditor() {
       throw new Error('Курс не найден');
     }
 
+    const ageMin = parseOptionalInteger('Возраст от', localAgeMin);
+    const ageMax = parseOptionalInteger('Возраст до', localAgeMax);
+    validateAgeRange(ageMin, ageMax);
+
     const res = await updateAdminDraft(courseId, {
       draft_version: draftVersion,
       title: localTitle,
       description: localDesc,
-      age_min: localAgeMin ? Number(localAgeMin) : undefined,
-      age_max: localAgeMax ? Number(localAgeMax) : undefined,
+      age_min: ageMin,
+      age_max: ageMax,
       cover_asset_id: draft?.cover_asset_id,
       content_json: { modules: serializeModules(localModules) },
     });
@@ -100,11 +111,14 @@ export default function AdminCourseEditor() {
     setSaving(true);
     setSaveError('');
     setSaveMsg('');
+    setValidationErrors([]);
     try {
       return await saveCurrentDraft(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Ошибка сохранения';
-      setSaveError(message);
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setSaveError(details.length > 0 ? '' : message);
       throw err instanceof Error ? err : new Error(message);
     } finally {
       setSaving(false);
@@ -115,12 +129,16 @@ export default function AdminCourseEditor() {
     if (!courseId) return;
     setPublishing(true);
     setSaveError('');
+    setValidationErrors([]);
     try {
       await handleSave();
       await publishAdminCourse(courseId);
       reload();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка публикации');
+      const message = err instanceof Error ? err.message : 'Ошибка публикации';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setSaveError(details.length > 0 ? '' : message);
     } finally {
       setPublishing(false);
     }
@@ -129,16 +147,20 @@ export default function AdminCourseEditor() {
   const handlePreview = useCallback(async (lessonId: string) => {
     if (!courseId) return;
     setPreviewing(true);
+    setValidationErrors([]);
     try {
       await handleSave();
-      const session = await createAdminPreview(courseId, lessonId);
-      window.open(`/admin/preview/${session.preview_session_id}`, '_blank');
+      const session = await createAdminPreview(courseId, lessonId, location.pathname);
+      window.open(`/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`, '_blank');
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
+      const message = err instanceof Error ? err.message : 'Ошибка предпросмотра';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setSaveError(details.length > 0 ? '' : message);
     } finally {
       setPreviewing(false);
     }
-  }, [courseId, handleSave]);
+  }, [courseId, handleSave, location.pathname]);
 
   async function handleEditLesson(lessonId: string) {
     if (!courseId) return;
@@ -146,11 +168,15 @@ export default function AdminCourseEditor() {
     setSaving(true);
     setSaveError('');
     setSaveMsg('');
+    setValidationErrors([]);
     try {
       await saveCurrentDraft();
       navigate(`/admin/courses/${courseId}/lessons/${lessonId}`);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка сохранения');
+      const message = err instanceof Error ? err.message : 'Ошибка сохранения';
+      const details = getDraftValidationErrors(err).map(item => item.message);
+      setValidationErrors(details);
+      setSaveError(details.length > 0 ? '' : message);
     } finally {
       setSaving(false);
     }
@@ -219,6 +245,16 @@ export default function AdminCourseEditor() {
 
       {saveMsg && <div className={styles.saveNotice}>{saveMsg}</div>}
       {saveError && <div className={styles.error}>{saveError}</div>}
+      {validationErrors.length > 0 && (
+        <div className={styles.error}>
+          <div>Что нужно исправить:</div>
+          <ul style={{ margin: '8px 0 0 20px' }}>
+            {validationErrors.map(item => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {draft.last_review_comment && (
         <div className={styles.error}>Комментарий модератора: {draft.last_review_comment}</div>
       )}
@@ -231,8 +267,8 @@ export default function AdminCourseEditor() {
           <Input label="Описание" value={localDesc} onChange={e => setLocalDesc(e.target.value)} />
         </div>
         <div className={styles.ageRow}>
-          <Input label="Возраст от" type="number" value={localAgeMin} onChange={e => setLocalAgeMin(e.target.value)} min={0} />
-          <Input label="Возраст до" type="number" value={localAgeMax} onChange={e => setLocalAgeMax(e.target.value)} min={0} />
+          <Input label="Возраст от" type="number" value={localAgeMin} onChange={e => setLocalAgeMin(e.target.value)} min={0} step={1} inputMode="numeric" />
+          <Input label="Возраст до" type="number" value={localAgeMax} onChange={e => setLocalAgeMax(e.target.value)} min={0} step={1} inputMode="numeric" />
         </div>
       </div>
 

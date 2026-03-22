@@ -27,7 +27,8 @@ test.describe('QA Bugs 2+3+preview/save semantics: lesson editor roundtrip', () 
     await page.getByRole('button', { name: /\+ Свободный ответ/i }).click();
     await page.getByRole('button', { name: /\+ Завершение/i }).click();
 
-    await page.getByLabel('Текст истории').fill('История о безопасном выборе.');
+    await expect(page.getByLabel('Текст истории').first()).toBeVisible({ timeout: 10000 });
+    await page.getByLabel('Текст истории').first().fill('История о безопасном выборе.');
     await page.getByLabel('Текст вопроса').first().fill('Какой вариант безопаснее?');
 
     const optionInputs = page.getByPlaceholder('Вариант ответа...');
@@ -107,11 +108,9 @@ test.describe('QA Bugs 2+3+preview/save semantics: lesson editor roundtrip', () 
     await expect(page.getByText(/Правильно|Частично|Неправильно/)).toBeVisible();
     await page.getByRole('button', { name: /Далее|Завершить|Продолжить/ }).click();
 
-    await expect(
-      page.getByText(/Миссия завершена|Предпросмотр этапа завершён|Конец этапа/i),
-    ).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('Миссия завершена!')).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole('button', { name: 'Вернуться в редактор' }).click();
+    await page.getByRole('button', { name: 'Вернуться в редактор' }).first().click();
     await page.waitForURL(/\/teacher\/courses\/.+\/lessons\/.+/);
     await page.reload();
 
@@ -122,5 +121,153 @@ test.describe('QA Bugs 2+3+preview/save semantics: lesson editor roundtrip', () 
     );
 
     await teacherContext.close();
+  });
+
+  test('admin lesson editor saves valid single-choice graph, preview reaches 100%, and return path works from popup', async ({ browser }) => {
+    const adminContext = await browser.newContext({ storageState: '.auth/admin.json' });
+    const page = await adminContext.newPage();
+    const courseTitle = `QA Admin Lesson ${Date.now()}`;
+
+    await page.goto('/admin/courses');
+    await page.getByRole('button', { name: /Создать курс/i }).click();
+    const createDialog = page.getByRole('dialog', { name: 'Создать курс' });
+    await expect(createDialog).toBeVisible();
+    await createDialog.getByLabel('Название').fill(courseTitle);
+    await createDialog.getByLabel('Описание').fill('Курс для проверки admin lesson editor');
+    await createDialog.getByRole('button', { name: 'Создать', exact: true }).click();
+
+    await page.waitForURL(/\/admin\/courses\/[^/]+$/);
+    await page.getByRole('button', { name: /\+ Модуль/i }).click();
+    const moduleDialog = page.getByRole('dialog', { name: 'Новый модуль' });
+    await moduleDialog.getByLabel('Название модуля').fill('Модуль админки');
+    await moduleDialog.getByRole('button', { name: 'Добавить' }).click();
+
+    await page.getByRole('button', { name: /\+ Урок/i }).click();
+    const lessonDialog = page.getByRole('dialog', { name: 'Новый урок' });
+    await lessonDialog.getByLabel('Название урока').fill('Первый урок');
+    await lessonDialog.getByRole('button', { name: 'Добавить' }).click();
+
+    await page.getByRole('button', { name: 'Редактировать' }).click();
+    await page.waitForURL(/\/admin\/courses\/.+\/lessons\/.+/);
+
+    await page.getByLabel('Название урока').fill('Первый урок v2');
+    await page.getByRole('button', { name: /История/ }).click();
+    await page.getByRole('button', { name: /Выбор ответа/ }).click();
+    await page.getByRole('button', { name: /Конец/ }).click();
+
+    const storyText = page.getByLabel('Текст').first();
+    await storyText.fill('Это история для проверки admin preview.');
+
+    await page.getByLabel('Вопрос').fill('Можно ли совать пальцы в розетку?');
+    const optionInputs = page.getByPlaceholder('Вариант ответа');
+    await optionInputs.nth(0).fill('Нет');
+    await optionInputs.nth(1).fill('Да');
+    await page.locator('button[title="Отметить правильный вариант"]').first().click();
+    await page.getByLabel('Обратная связь (правильно)').fill('Верно, так делать нельзя.');
+    await page.getByLabel('Обратная связь (неправильно)').fill('Нет, это опасно.');
+
+    const saveRequest = page.waitForRequest((request) =>
+      request.method() === 'PUT' && request.url().includes('/draft'),
+    );
+    const saveResponse = page.waitForResponse((response) =>
+      response.request().method() === 'PUT' && response.url().includes('/draft'),
+    );
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    const saveBody = (await saveRequest).postDataJSON() as Record<string, unknown>;
+    expect((await saveResponse).ok()).toBeTruthy();
+
+    const content = (saveBody.content ?? saveBody.content_json) as Record<string, unknown>;
+    const modules = (content.modules as Array<Record<string, unknown>>) ?? [];
+    const lesson = ((modules[0]?.lessons as Array<Record<string, unknown>>) ?? [])[0];
+    const graph = lesson.graph as Record<string, unknown>;
+    const nodes = (graph.nodes as Array<Record<string, unknown>>) ?? [];
+    const singleChoiceNode = nodes.find(node => node.kind === 'single_choice');
+    expect(singleChoiceNode).toBeTruthy();
+    const options = ((singleChoiceNode?.options as Array<Record<string, unknown>>) ?? []);
+    expect(options).toHaveLength(2);
+    expect(options[0].id).toBeTruthy();
+    expect(options[0].feedback).toBeTruthy();
+    expect(options[0].result).toBeTruthy();
+    expect(options[0].nextNodeId).toBeTruthy();
+
+    const popupPromise = page.waitForEvent('popup');
+    await page.getByRole('button', { name: 'Превью' }).click();
+    const previewPage = await popupPromise;
+    await previewPage.waitForURL(/\/admin\/preview\/.+/);
+    await previewPage.reload();
+    await expect(previewPage.getByText('Это история для проверки admin preview.')).toBeVisible({ timeout: 10000 });
+    await previewPage.getByRole('button', { name: 'Далее' }).click();
+    await expect(previewPage.getByText('Можно ли совать пальцы в розетку?')).toBeVisible();
+    await previewPage.getByRole('button', { name: 'Нет' }).click();
+    await previewPage.getByRole('button', { name: 'Ответить' }).click();
+    await expect(previewPage.getByText('Правильно!')).toBeVisible({ timeout: 10000 });
+    await previewPage.getByRole('button', { name: 'Далее' }).click();
+    await expect(previewPage.getByText('Миссия завершена!')).toBeVisible({ timeout: 10000 });
+    await expect(previewPage.getByText('100%')).toBeVisible();
+    await previewPage.getByRole('button', { name: 'Вернуться в редактор' }).first().click();
+    await previewPage.waitForURL(/\/admin\/courses\/.+\/lessons\/.+/);
+    await expect(previewPage.getByLabel('Название урока')).toHaveValue('Первый урок v2');
+    await previewPage.close();
+
+    await adminContext.close();
+  });
+
+  test('admin lesson editor shows specific Russian validation errors instead of raw backend messages', async ({ browser }) => {
+    const adminContext = await browser.newContext({ storageState: '.auth/admin.json' });
+    const page = await adminContext.newPage();
+    const courseTitle = `QA Admin Validation ${Date.now()}`;
+
+    await page.goto('/admin/courses');
+    await page.getByRole('button', { name: /Создать курс/i }).click();
+    const createDialog = page.getByRole('dialog', { name: 'Создать курс' });
+    await expect(createDialog).toBeVisible();
+    await createDialog.getByLabel('Название').fill(courseTitle);
+    await createDialog.getByLabel('Описание').fill('Курс для проверки сообщений об ошибках');
+    await createDialog.getByRole('button', { name: 'Создать', exact: true }).click();
+
+    await page.waitForURL(/\/admin\/courses\/[^/]+$/);
+    await page.getByRole('button', { name: /\+ Модуль/i }).click();
+    const moduleDialog = page.getByRole('dialog', { name: 'Новый модуль' });
+    await moduleDialog.getByLabel('Название модуля').fill('Модуль ошибок');
+    await moduleDialog.getByRole('button', { name: 'Добавить' }).click();
+
+    await page.getByRole('button', { name: /\+ Урок/i }).click();
+    const lessonDialog = page.getByRole('dialog', { name: 'Новый урок' });
+    await lessonDialog.getByLabel('Название урока').fill('Урок ошибок');
+    await lessonDialog.getByRole('button', { name: 'Добавить' }).click();
+
+    await page.getByRole('button', { name: 'Редактировать' }).click();
+    await page.waitForURL(/\/admin\/courses\/.+\/lessons\/.+/);
+
+    await page.getByRole('button', { name: /История/ }).click();
+    await page.getByRole('button', { name: /Выбор ответа/ }).click();
+    await page.getByRole('button', { name: /Конец/ }).click();
+
+    await page.getByLabel('Текст').first().fill('Проверка сообщений об ошибках.');
+    await page.getByLabel('Вопрос').fill('Можно ли открывать дверь незнакомцам?');
+
+    const optionInputs = page.getByPlaceholder('Вариант ответа');
+    await optionInputs.nth(0).fill('Нет');
+    await optionInputs.nth(1).fill('Да');
+
+    await page.getByLabel('Обратная связь (правильно)').fill('');
+    await page.getByLabel('Обратная связь (неправильно)').fill('');
+
+    const saveResponse = page.waitForResponse((response) =>
+      response.request().method() === 'PUT' && response.url().includes('/draft'),
+    );
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    expect((await saveResponse).status()).toBe(422);
+
+    await expect(page.getByText('Что нужно исправить:')).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByText('У каждого варианта ответа должны быть заполнены результат, обратная связь и переход к следующему блоку.'),
+    ).toBeVisible();
+    await expect(page.getByText(/Draft contains validation errors|Invalid JSON body/i)).not.toBeVisible();
+    await expect(
+      page.getByText('У каждого варианта ответа должны быть заполнены результат, обратная связь и переход к следующему блоку.'),
+    ).toHaveCount(1);
+
+    await adminContext.close();
   });
 });
