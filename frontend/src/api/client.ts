@@ -214,7 +214,18 @@ export const createTeacherPreview = (courseId: string, lessonId: string) => post
 export const createTeacherAccessLink = (courseId: string) => post<import('./types').AccessLink>(`/teacher/courses/${courseId}/access-links`);
 export const getTeacherAccessLinks = (courseId: string) => getList<import('./types').AccessLink>(`/teacher/courses/${courseId}/access-links`);
 export const revokeTeacherAccessLink = (linkId: string) => post<void>(`/teacher/access-links/${linkId}/revoke`);
-export const getTeacherStudents = (courseId: string) => getList<import('./types').TeacherStudent>(`/teacher/courses/${courseId}/students`);
+export const getTeacherStudents = async (courseId: string): Promise<import('./types').TeacherStudent[]> => {
+  const items = await getList<Record<string, unknown>>(`/teacher/courses/${courseId}/students`);
+  return items.map(s => ({
+    student_id: (s.student_id ?? '') as string,
+    display_name: (s.display_name ?? '') as string,
+    avatar_url: (s.avatar_url as string) ?? undefined,
+    progress_pct: (s.progress_percent ?? s.progress_pct ?? 0) as number,
+    xp_earned: (s.xp_total ?? s.xp_earned ?? 0) as number,
+    accuracy_pct: (s.correctness_percent ?? s.accuracy_pct ?? 0) as number,
+    last_activity_at: (s.last_activity_at ?? '') as string,
+  }));
+};
 export const getTeacherStudentDetail = (courseId: string, studentId: string) => get<import('./types').TeacherStudentDetail>(`/teacher/courses/${courseId}/students/${studentId}`);
 export const archiveTeacherCourse = (courseId: string) => post<void>(`/teacher/courses/${courseId}/archive`);
 export const getTeacherProfile = () => get<import('./types').TeacherProfile>('/teacher/profile');
@@ -281,9 +292,43 @@ export const rejectReview = (reviewId: string, comment: string) => post<void>(`/
 export const getOffers = () => getList<import('./types').CommercialOffer>('/admin/commerce/offers');
 export const createOffer = (data: Record<string, unknown>) => post<{ offer_id: string }>('/admin/commerce/offers', data);
 export const updateOffer = (offerId: string, data: Record<string, unknown>) => put<void>(`/admin/commerce/offers/${offerId}`, data);
-export const getPurchaseRequests = () => getList<import('./types').PurchaseRequest>('/admin/commerce/purchase-requests');
+export const getPurchaseRequests = async (): Promise<import('./types').PurchaseRequest[]> => {
+  const items = await getList<Record<string, unknown>>('/admin/commerce/purchase-requests');
+  return items.map(r => {
+    const student = (r.student ?? {}) as Record<string, unknown>;
+    const offer = (r.offer ?? {}) as Record<string, unknown>;
+    return {
+      request_id: (r.purchase_request_id ?? r.request_id ?? '') as string,
+      student_id: (student.account_id ?? r.student_id ?? '') as string,
+      student_name: (student.display_name ?? r.student_name ?? '') as string,
+      offer_id: (offer.offer_id ?? r.offer_id ?? '') as string,
+      offer_title: (offer.title ?? r.offer_title ?? '') as string,
+      target_type: (r.target_type ?? '') as string,
+      status: (r.status ?? 'open') as 'open' | 'processed' | 'declined',
+      created_at: (r.created_at ?? '') as string,
+    };
+  });
+};
 export const declinePurchaseRequest = (requestId: string) => post<void>(`/admin/commerce/purchase-requests/${requestId}/decline`);
-export const getOrders = () => getList<import('./types').CommercialOrder>('/admin/commerce/orders');
+export const getOrders = async (): Promise<import('./types').CommercialOrder[]> => {
+  const items = await getList<Record<string, unknown>>('/admin/commerce/orders');
+  return items.map(o => {
+    const student = (o.student ?? {}) as Record<string, unknown>;
+    const offer = (o.offer ?? {}) as Record<string, unknown>;
+    return {
+      order_id: (o.order_id ?? '') as string,
+      student_id: (student.account_id ?? o.student_id ?? '') as string,
+      student_name: (student.display_name ?? o.student_name ?? '') as string,
+      offer_title: (offer.title ?? o.offer_title ?? '') as string,
+      target_type: (o.target_type ?? '') as string,
+      status: (o.status ?? 'awaiting_confirmation') as 'awaiting_confirmation' | 'fulfilled' | 'canceled',
+      price_amount_minor: (o.price_amount_minor ?? 0) as number,
+      price_currency: (o.price_currency ?? o.currency ?? 'RUB') as string,
+      created_at: (o.created_at ?? '') as string,
+      fulfilled_at: (o.fulfilled_at as string) ?? undefined,
+    };
+  });
+};
 export const createManualOrder = (data: Record<string, unknown>) => post<{ order_id: string }>('/admin/commerce/orders/manual', data);
 export const confirmPayment = (orderId: string, data: Record<string, unknown>, idempotencyKey: string) =>
   post<void>(`/admin/commerce/orders/${orderId}/payments/manual-confirm`, data, { 'Idempotency-Key': idempotencyKey });

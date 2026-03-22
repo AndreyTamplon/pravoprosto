@@ -7,6 +7,7 @@ import {
   createTeacherPreview,
 } from '../../api/client';
 import type { CourseDraft, ContentModule, GraphNode, GraphEdge, LessonGraph } from '../../api/types';
+import { graphToBackendFormat, graphFromBackendFormat } from '../../api/types';
 import { Button, ComicPanel, Badge, Spinner, Textarea, Modal } from '../../components/ui';
 import s from './LessonConstructor.module.css';
 
@@ -74,9 +75,8 @@ const nodeTypeLabels: Record<string, { label: string; color: 'blue' | 'orange' |
 };
 
 export default function LessonConstructor() {
-  const { courseId, moduleId, lessonId } = useParams<{
+  const { courseId, lessonId } = useParams<{
     courseId: string;
-    moduleId: string;
     lessonId: string;
   }>();
   const navigate = useNavigate();
@@ -97,21 +97,35 @@ export default function LessonConstructor() {
   const [error, setError] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
-  // Find our lesson in the draft
+  // Find our lesson in the draft (scan all modules for lessonId)
+  const moduleId = draft?.content_json?.modules?.find(
+    m => m.lessons.some(l => l.id === lessonId),
+  )?.id;
+
   useEffect(() => {
     if (!draft) return;
     for (const mod of draft.content_json?.modules ?? []) {
-      if (mod.id !== moduleId) continue;
       const lesson = mod.lessons.find(l => l.id === lessonId);
       if (lesson) {
         setLessonTitle(lesson.title);
-        setNodes(lesson.graph?.nodes ?? []);
-        setEdges(lesson.graph?.edges ?? []);
-        setStartNodeId(lesson.graph?.startNodeId ?? '');
+        // Detect backend format (nodes have 'kind' not 'type') and convert
+        const rawGraph = lesson.graph as Record<string, unknown>;
+        const rawNodes = (rawGraph?.nodes as Array<Record<string, unknown>>) ?? [];
+        const isBackendFormat = rawNodes.length > 0 && rawNodes[0].kind;
+        if (isBackendFormat) {
+          const converted = graphFromBackendFormat(rawGraph);
+          setNodes(converted.nodes);
+          setEdges(converted.edges);
+          setStartNodeId(converted.startNodeId);
+        } else {
+          setNodes(lesson.graph?.nodes ?? []);
+          setEdges(lesson.graph?.edges ?? []);
+          setStartNodeId(lesson.graph?.startNodeId ?? '');
+        }
+        break;
       }
-      break;
     }
-  }, [draft, moduleId, lessonId]);
+  }, [draft, lessonId]);
 
   // Auto-compute edges: simple linear DAG
   const recomputeEdges = useCallback((nodeList: GraphNode[]): GraphEdge[] => {
@@ -266,18 +280,20 @@ export default function LessonConstructor() {
     setError(null);
     setSaved(false);
     try {
-      const graph: LessonGraph = {
+      const editorGraph: LessonGraph = {
         startNodeId: startNodeId || (nodes[0]?.id ?? ''),
         nodes,
         edges,
       };
+      // Convert to backend format (kind/nextNodeId/options/transitions)
+      const backendGraph = graphToBackendFormat(editorGraph);
 
       const updatedModules: ContentModule[] = (draft.content_json?.modules ?? []).map(mod => {
         if (mod.id !== moduleId) return mod;
         return {
           ...mod,
           lessons: mod.lessons.map(l =>
-            l.id === lessonId ? { ...l, title: lessonTitle, graph } : l,
+            l.id === lessonId ? { ...l, title: lessonTitle, graph: backendGraph as unknown as LessonGraph } : l,
           ),
         };
       });
@@ -294,7 +310,7 @@ export default function LessonConstructor() {
     } finally {
       setSaving(false);
     }
-  }, [draft, courseId, moduleId, lessonId, lessonTitle, nodes, edges, startNodeId]);
+  }, [draft, courseId, moduleId, lessonId, lessonTitle, nodes, edges, startNodeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview
   const handlePreview = useCallback(async () => {

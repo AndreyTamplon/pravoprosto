@@ -87,6 +87,8 @@ export default async function globalSetup(): Promise<void> {
     PRAVO_BASE_URL: `http://localhost:${BACKEND_PORT}`,
     PRAVO_DATABASE_URL: `postgres://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${DB_NAME}?sslmode=disable`,
     PGPASSWORD: PG_PASSWORD,
+    MOCK_SSO_PORT: SSO_PORT,
+    MOCK_LLM_PORT: LLM_PORT,
   };
 
   let seedOutput: string;

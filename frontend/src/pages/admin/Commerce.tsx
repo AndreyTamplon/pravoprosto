@@ -99,6 +99,7 @@ function OffersTab() {
         title: eTitle.trim(),
         description: eDesc.trim(),
         price_amount_minor: Math.round(Number(ePrice) * 100),
+        price_currency: showEdit.price_currency || 'RUB',
         status: eStatus,
       });
       setShowEdit(null);
@@ -112,7 +113,13 @@ function OffersTab() {
 
   async function handleArchive(offer: CommercialOffer) {
     try {
-      await updateOffer(offer.offer_id, { status: 'archived' });
+      await updateOffer(offer.offer_id, {
+        title: offer.title,
+        description: offer.description,
+        price_amount_minor: offer.price_amount_minor,
+        price_currency: offer.price_currency || 'RUB',
+        status: 'archived',
+      });
       reload();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Ошибка архивации оффера');
@@ -403,10 +410,13 @@ function OrdersTab() {
     setActionError('');
     try {
       const key = generateIdempotencyKey();
+      const reason = confirmReason.trim();
       await confirmPayment(selectedOrder.order_id, {
         external_reference: confirmRef.trim(),
-        amount_confirmed_minor: Math.round(Number(confirmAmount) * 100),
-        override_reason: confirmReason.trim() || undefined,
+        amount_minor: Math.round(Number(confirmAmount) * 100),
+        currency: selectedOrder.price_currency || 'RUB',
+        paid_at: new Date().toISOString(),
+        ...(reason ? { override: { reason } } : {}),
       }, key);
       setSelectedOrder(null);
       reload();

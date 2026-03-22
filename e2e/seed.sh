@@ -17,6 +17,8 @@ set -euo pipefail
 
 BASE="${PRAVO_BASE_URL:-http://localhost:8080}"
 DB_URL="${PRAVO_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/pravoprost_e2e?sslmode=disable}"
+SSO_PORT="${MOCK_SSO_PORT:-8091}"
+LLM_PORT="${MOCK_LLM_PORT:-8090}"
 COOKIE_DIR="$(mktemp -d)"
 
 # Colors
@@ -115,8 +117,8 @@ json_field() {
 
 info "Checking services..."
 curl -sS "$BASE/health" > /dev/null || { error "Backend not reachable at $BASE"; exit 1; }
-curl -sS "http://localhost:8091/health" > /dev/null || { error "Mock SSO not reachable"; exit 1; }
-curl -sS "http://localhost:8090/health" > /dev/null || { error "Mock LLM not reachable"; exit 1; }
+curl -sS "http://localhost:${SSO_PORT}/health" > /dev/null || { error "Mock SSO not reachable on port $SSO_PORT"; exit 1; }
+curl -sS "http://localhost:${LLM_PORT}/health" > /dev/null || { error "Mock LLM not reachable on port $LLM_PORT"; exit 1; }
 info "All services are up."
 
 # ---------------------------------------------------------------------------
@@ -464,7 +466,17 @@ info "  Admin approved teacher course"
 
 info "Teacher creating access link..."
 LINK_RESP=$(api_post "teacher" "$TEACHER_CSRF" "/api/v1/teacher/courses/$TEACHER_COURSE_ID/access-links" '{}')
-ACCESS_TOKEN=$(json_field "$LINK_RESP" "token")
+ACCESS_TOKEN=$(echo "$LINK_RESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+url = d.get('claim_url', '')
+if '#token=' in url:
+    print(url.split('#token=')[1])
+elif 'token=' in url:
+    print(url.split('token=')[-1].split('&')[0])
+else:
+    print(d.get('token', ''))
+" 2>/dev/null)
 info "  Access link token: $ACCESS_TOKEN"
 
 # ---------------------------------------------------------------------------

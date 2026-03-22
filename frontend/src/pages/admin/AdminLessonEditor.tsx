@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { getAdminDraft, updateAdminDraft, createAdminPreview } from '../../api/client';
 import { Button, Badge, Spinner, EmptyState, Input, Textarea } from '../../components/ui';
-import type { CourseDraft, GraphNode, GraphEdge, ContentModule, ContentLesson } from '../../api/types';
+import type { CourseDraft, GraphNode, GraphEdge, ContentModule, ContentLesson, LessonGraph } from '../../api/types';
+import { graphToBackendFormat, graphFromBackendFormat } from '../../api/types';
 import styles from './AdminLessonEditor.module.css';
 
 type NodeType = 'story' | 'single_choice' | 'free_text' | 'terminal';
@@ -27,7 +28,7 @@ function generateId(): string {
 }
 
 export default function AdminLessonEditor() {
-  const { courseId, moduleId, lessonId } = useParams<{ courseId: string; moduleId: string; lessonId: string }>();
+  const { courseId, lessonId } = useParams<{ courseId: string; lessonId: string }>();
   const navigate = useNavigate();
 
   const { data: draft, loading, error } = useApi<CourseDraft>(
@@ -43,20 +44,38 @@ export default function AdminLessonEditor() {
   const [saveMsg, setSaveMsg] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  // Find moduleId by scanning all modules
+  const moduleId = draft?.content_json?.modules?.find(
+    (m: ContentModule) => m.lessons.some((l: ContentLesson) => l.id === lessonId),
+  )?.id;
+
   // Initialize from draft
   useEffect(() => {
     if (draft && !initialized) {
-      const mod = draft.content_json?.modules?.find((m: ContentModule) => m.id === moduleId);
-      const lesson = mod?.lessons?.find((l: ContentLesson) => l.id === lessonId);
-      if (lesson) {
-        setNodes(lesson.graph.nodes);
-        setEdges(lesson.graph.edges);
-        setStartNodeId(lesson.graph.startNodeId);
-        setLessonTitle(lesson.title);
+      for (const mod of draft.content_json?.modules ?? []) {
+        const lesson = mod.lessons.find((l: ContentLesson) => l.id === lessonId);
+        if (lesson) {
+          // Detect backend format (nodes have 'kind' not 'type') and convert
+          const rawGraph = lesson.graph as unknown as Record<string, unknown>;
+          const rawNodes = (rawGraph?.nodes as Array<Record<string, unknown>>) ?? [];
+          const isBackendFormat = rawNodes.length > 0 && rawNodes[0].kind;
+          if (isBackendFormat) {
+            const converted = graphFromBackendFormat(rawGraph);
+            setNodes(converted.nodes);
+            setEdges(converted.edges);
+            setStartNodeId(converted.startNodeId);
+          } else {
+            setNodes(lesson.graph.nodes);
+            setEdges(lesson.graph.edges);
+            setStartNodeId(lesson.graph.startNodeId);
+          }
+          setLessonTitle(lesson.title);
+          break;
+        }
       }
       setInitialized(true);
     }
-  }, [draft, initialized, moduleId, lessonId]);
+  }, [draft, initialized, lessonId]);
 
   const handleSave = useCallback(async () => {
     if (!draft || !courseId || !moduleId || !lessonId) return;
@@ -70,7 +89,8 @@ export default function AdminLessonEditor() {
           ...m,
           lessons: m.lessons.map((l: ContentLesson) => {
             if (l.id !== lessonId) return l;
-            return { ...l, title: lessonTitle, graph: { startNodeId, nodes, edges } };
+            const backendGraph = graphToBackendFormat({ startNodeId, nodes, edges });
+            return { ...l, title: lessonTitle, graph: backendGraph as unknown as LessonGraph };
           }),
         };
       });

@@ -54,16 +54,13 @@ test.describe('Gate 2 -- Teacher publish and multi-role flow', () => {
     const studentPage = await studentContext.newPage();
 
     // Student2 claims the seeded teacher course access link
-    await studentPage.goto(`/claim?token=${accessLinkToken}`);
-
-    // Wait for claim result
-    await studentPage.waitForTimeout(2000);
+    // Backend generates URLs with #token= (hash fragment)
+    await studentPage.goto(`/claim/course-link#token=${accessLinkToken}`);
 
     // Should see success or already-claimed state
-    const success = await studentPage.getByText(/Готово|успешно|добавлен/i).isVisible().catch(() => false);
-    const alreadyClaimed = await studentPage.getByText(/уже|ранее/i).isVisible().catch(() => false);
-
-    expect(success || alreadyClaimed).toBeTruthy();
+    await expect(
+      studentPage.getByRole('heading', { name: 'Готово!' }),
+    ).toBeVisible({ timeout: 15000 });
 
     // Navigate to catalog and verify teacher course is visible
     await studentPage.goto('/student/courses');

@@ -290,6 +290,134 @@ export interface GraphEdge {
   condition?: string;
 }
 
+/**
+ * Convert editor graph (type/data/edges) to backend format (kind/nextNodeId/options/transitions).
+ */
+export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown> {
+  const { startNodeId, nodes, edges } = graph;
+
+  // Build edge map: fromId -> toId (for simple linear edges)
+  const edgeMap = new Map<string, string>();
+  for (const e of edges) {
+    edgeMap.set(e.from, e.to);
+  }
+
+  const backendNodes: Record<string, unknown>[] = nodes.map(node => {
+    const nextNodeId = edgeMap.get(node.id) ?? '';
+    const kind = node.type === 'terminal' ? 'end' : node.type;
+
+    if (kind === 'story') {
+      return {
+        id: node.id,
+        kind,
+        nextNodeId,
+        text: (node.data.text as string) ?? '',
+        asset_url: (node.data.illustration_url as string) ?? '',
+      };
+    }
+
+    if (kind === 'single_choice') {
+      const opts = (node.data.options as Array<{ option_id?: string; id?: string; text: string; is_correct?: boolean }>) ?? [];
+      const correctId = (node.data.correct_option_id as string) ?? '';
+      const feedbackCorrect = (node.data.feedback_correct as string) ?? '';
+      const feedbackIncorrect = (node.data.feedback_incorrect as string) ?? '';
+      return {
+        id: node.id,
+        kind,
+        prompt: (node.data.question_text as string) ?? '',
+        options: opts.map(o => {
+          const optId = o.option_id ?? o.id ?? '';
+          const isCorrect = o.is_correct ?? (optId === correctId);
+          return {
+            id: optId,
+            text: o.text,
+            result: isCorrect ? 'correct' : 'incorrect',
+            feedback: isCorrect ? feedbackCorrect : feedbackIncorrect,
+            nextNodeId,
+          };
+        }),
+      };
+    }
+
+    if (kind === 'free_text') {
+      return {
+        id: node.id,
+        kind,
+        prompt: (node.data.question_text as string) ?? '',
+        rubric: {
+          reference_answer: (node.data.reference_answer ?? node.data.expected_answer ?? '') as string,
+          criteria: (node.data.criteria as string) ?? '',
+        },
+        transitions: [
+          { onVerdict: 'correct', nextNodeId },
+          { onVerdict: 'partial', nextNodeId },
+          { onVerdict: 'incorrect', nextNodeId },
+        ],
+      };
+    }
+
+    // end node
+    return {
+      id: node.id,
+      kind: 'end',
+    };
+  });
+
+  return { startNodeId, nodes: backendNodes };
+}
+
+/**
+ * Convert backend graph format back to editor format for editing.
+ */
+export function graphFromBackendFormat(raw: Record<string, unknown>): LessonGraph {
+  const startNodeId = (raw.startNodeId as string) ?? '';
+  const rawNodes = (raw.nodes as Array<Record<string, unknown>>) ?? [];
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  for (const rn of rawNodes) {
+    const id = (rn.id as string) ?? '';
+    const kind = (rn.kind as string) ?? (rn.type as string) ?? 'story';
+    const type = kind === 'end' ? 'terminal' : kind as GraphNode['type'];
+    const data: Record<string, unknown> = {};
+
+    if (kind === 'story') {
+      data.text = (rn.text as string) ?? '';
+      data.illustration_url = (rn.asset_url as string) ?? '';
+      const nextNodeId = (rn.nextNodeId as string) ?? '';
+      if (nextNodeId) edges.push({ from: id, to: nextNodeId });
+    } else if (kind === 'single_choice') {
+      data.question_text = (rn.prompt as string) ?? '';
+      const opts = (rn.options as Array<Record<string, unknown>>) ?? [];
+      let correctId = '';
+      data.options = opts.map(o => {
+        const optId = (o.id as string) ?? '';
+        if ((o.result as string) === 'correct') correctId = optId;
+        return { option_id: optId, text: (o.text as string) ?? '' };
+      });
+      data.correct_option_id = correctId;
+      data.feedback_correct = opts.find(o => (o.result as string) === 'correct')?.feedback ?? '';
+      data.feedback_incorrect = opts.find(o => (o.result as string) !== 'correct')?.feedback ?? '';
+      // All options point to same nextNodeId
+      const nextId = (opts[0]?.nextNodeId as string) ?? '';
+      if (nextId) edges.push({ from: id, to: nextId });
+    } else if (kind === 'free_text') {
+      data.question_text = (rn.prompt as string) ?? '';
+      const rubric = (rn.rubric as Record<string, unknown>) ?? {};
+      data.reference_answer = (rubric.reference_answer as string) ?? '';
+      data.criteria = (rubric.criteria as string) ?? '';
+      const transitions = (rn.transitions as Array<Record<string, unknown>>) ?? [];
+      const correctTransition = transitions.find(t => (t.onVerdict as string) === 'correct');
+      const nextId = (correctTransition?.nextNodeId as string) ?? '';
+      if (nextId) edges.push({ from: id, to: nextId });
+    }
+
+    nodes.push({ id, type, data });
+  }
+
+  return { startNodeId, nodes, edges };
+}
+
 export interface TeacherStudent {
   student_id: string;
   display_name: string;

@@ -150,7 +150,7 @@ export default function App() {
             } />
 
             {/* Claim links (need auth but any student role) */}
-            <Route path="/claim" element={
+            <Route path="/claim/*" element={
               <RequireAuth><ClaimLink /></RequireAuth>
             } />
 

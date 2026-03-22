@@ -11,7 +11,10 @@ export default function ClaimLink() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const token = searchParams.get('token') ?? '';
+  // Backend generates URLs with hash fragment: /claim/course-link#token=...
+  // Hash fragments aren't in searchParams, so check both
+  const hashToken = location.hash.startsWith('#token=') ? location.hash.slice(7) : '';
+  const token = searchParams.get('token') || hashToken;
   const isGuardian = location.pathname.includes('guardian');
 
   const [state, setState] = useState<ClaimState>('loading');

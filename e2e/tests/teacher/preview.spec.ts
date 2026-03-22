@@ -32,9 +32,7 @@ test.describe('Teacher: Preview player', () => {
     if (nodeCount > 0) {
       // At least one node type badge should be visible
       await expect(
-        page.getByText('Блок истории')
-          .or(page.getByText('Выбор ответа'))
-          .or(page.getByText('Завершение'))
+        page.getByText('Блок истории').first()
       ).toBeVisible();
     }
 
