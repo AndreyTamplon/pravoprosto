@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 
 type Service struct {
 	db         *pgxpool.Pool
+	logger     *slog.Logger
 	mu         sync.RWMutex
 	previews   map[string]*previewSession
 	evaluator  evaluation.FreeTextEvaluator
@@ -27,9 +29,10 @@ type Service struct {
 	previewMax int
 }
 
-func NewService(db *pgxpool.Pool, evaluator evaluation.FreeTextEvaluator) *Service {
+func NewService(db *pgxpool.Pool, evaluator evaluation.FreeTextEvaluator, logger *slog.Logger) *Service {
 	return &Service{
 		db:         db,
+		logger:     logger,
 		previews:   make(map[string]*previewSession),
 		evaluator:  evaluator,
 		previewTTL: 30 * time.Minute,
@@ -339,14 +342,14 @@ func (s *Service) PromoCourses(ctx context.Context) (map[string]any, error) {
 			return nil, err
 		}
 		items = append(items, map[string]any{
-			"course_id":   courseID,
-			"title":       title,
-			"description": description,
-			"cover_url":   coverURL,
-			"age_min":     ageMin,
-			"age_max":     ageMax,
+			"course_id":    courseID,
+			"title":        title,
+			"description":  description,
+			"cover_url":    coverURL,
+			"age_min":      ageMin,
+			"age_max":      ageMax,
 			"lesson_count": lessonCount,
-			"badge":       "Популярный",
+			"badge":        "Популярный",
 		})
 	}
 	return map[string]any{"items": items}, rows.Err()

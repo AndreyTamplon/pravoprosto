@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -19,15 +20,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	platformconfig "pravoprost/backend/internal/platform/config"
+	platformlogging "pravoprost/backend/internal/platform/logging"
 )
 
 type Service struct {
 	db     *pgxpool.Pool
 	config platformconfig.Config
+	logger *slog.Logger
 }
 
-func NewService(db *pgxpool.Pool, cfg platformconfig.Config) *Service {
-	return &Service{db: db, config: cfg}
+func NewService(db *pgxpool.Pool, cfg platformconfig.Config, logger *slog.Logger) *Service {
+	return &Service{db: db, config: cfg, logger: logger}
 }
 
 type CreateLinkInput struct {
@@ -167,6 +170,8 @@ func (s *Service) ListLinks(ctx context.Context, teacherID string, courseID stri
 				url := strings.TrimRight(s.config.BaseURL, "/") + "/claim/course-link#token=" + token
 				claimURL = &url
 				urlStatus = "available"
+			} else {
+				platformlogging.FromContext(ctx, s.logger).Warn("failed to decrypt teacher access token", "link_id", linkID, "err", err)
 			}
 		}
 		if status == "active" && expiresAt != nil {

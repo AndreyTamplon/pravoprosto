@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -19,14 +20,15 @@ import (
 type Service struct {
 	db        *pgxpool.Pool
 	config    platformconfig.Config
+	logger    *slog.Logger
 	evaluator evaluation.FreeTextEvaluator
 }
 
-func NewService(db *pgxpool.Pool, cfg platformconfig.Config, evaluator evaluation.FreeTextEvaluator) *Service {
+func NewService(db *pgxpool.Pool, cfg platformconfig.Config, evaluator evaluation.FreeTextEvaluator, logger *slog.Logger) *Service {
 	if evaluator == nil {
-		evaluator = evaluation.NewOpenAICompatibleAdapter(cfg)
+		evaluator = evaluation.NewOpenAICompatibleAdapter(cfg, logger)
 	}
-	return &Service{db: db, config: cfg, evaluator: evaluator}
+	return &Service{db: db, config: cfg, logger: logger, evaluator: evaluator}
 }
 
 type CatalogView struct {

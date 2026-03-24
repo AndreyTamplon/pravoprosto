@@ -16,6 +16,7 @@ import (
 	"pravoprost/backend/internal/identity"
 	"pravoprost/backend/internal/platform/config"
 	platformdb "pravoprost/backend/internal/platform/db"
+	platformlogging "pravoprost/backend/internal/platform/logging"
 )
 
 type TestApp struct {
@@ -208,9 +209,11 @@ func New(t *testing.T) *TestApp {
 		t.Fatalf("apply migrations: %v", err)
 	}
 
+	logger := platformlogging.NewDiscardLogger()
 	server := httptest.NewServer(httpserver.NewRouter(httpserver.Dependencies{
 		Config: cfg,
 		DB:     db,
+		Logger: logger,
 	}))
 
 	t.Cleanup(func() {
@@ -303,10 +306,12 @@ func NewWithRegistry(t *testing.T, registry *identity.ProviderRegistry) *TestApp
 		t.Fatalf("apply migrations: %v", err)
 	}
 
-	identitySvc := identity.NewService(db.Pool(), cfg, registry)
+	logger := platformlogging.NewDiscardLogger()
+	identitySvc := identity.NewService(db.Pool(), cfg, registry, logger)
 	server := httptest.NewServer(httpserver.NewRouter(httpserver.Dependencies{
 		Config:   cfg,
 		DB:       db,
+		Logger:   logger,
 		Identity: identitySvc,
 	}))
 

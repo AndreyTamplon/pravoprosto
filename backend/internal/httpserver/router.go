@@ -3,6 +3,7 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"pravoprost/backend/internal/lessonruntime"
 	platformconfig "pravoprost/backend/internal/platform/config"
 	"pravoprost/backend/internal/platform/db"
+	platformlogging "pravoprost/backend/internal/platform/logging"
 	"pravoprost/backend/internal/profiles"
 	"pravoprost/backend/internal/teacheraccess"
 )
@@ -25,6 +27,7 @@ import (
 type Dependencies struct {
 	Config        platformconfig.Config
 	DB            *db.DB
+	Logger        *slog.Logger
 	Identity      *identity.Service
 	Profiles      *profiles.Service
 	Assets        *assets.Service
@@ -51,7 +54,15 @@ func writeDraftValidationFailure(w http.ResponseWriter, err error) bool {
 }
 
 func NewRouter(deps Dependencies) http.Handler {
+	baseLogger := deps.Logger
+	if baseLogger == nil {
+		baseLogger = platformlogging.NewDiscardLogger()
+	}
+
 	router := chi.NewRouter()
+	router.Use(requestContextMiddleware(baseLogger))
+	router.Use(accessLogMiddleware(baseLogger))
+	router.Use(recoveryMiddleware(baseLogger))
 	router.Use(limitRequestBody(deps.Config.MaxRequestBodyBytes))
 	router.Use(securityHeaders)
 
@@ -64,11 +75,12 @@ func NewRouter(deps Dependencies) http.Handler {
 				AuthURL:      deps.Config.YandexAuthURL,
 				TokenURL:     deps.Config.YandexTokenURL,
 				UserInfoURL:  deps.Config.YandexUserInfoURL,
+				Logger:       platformlogging.Named(baseLogger, "identity_yandex_provider"),
 			}))
 		} else if deps.Config.SSOBaseURL != "" {
-			registry.Register(identity.NewLegacyExternalProvider("yandex", deps.Config.SSOBaseURL))
+			registry.Register(identity.NewLegacyExternalProvider("yandex", deps.Config.SSOBaseURL, platformlogging.Named(baseLogger, "identity_legacy_provider")))
 		}
-		deps.Identity = identity.NewService(deps.DB.Pool(), deps.Config, registry)
+		deps.Identity = identity.NewService(deps.DB.Pool(), deps.Config, registry, platformlogging.Named(baseLogger, "identity"))
 	}
 	if deps.Profiles == nil {
 		deps.Profiles = profiles.NewService(deps.DB.Pool())
@@ -77,16 +89,25 @@ func NewRouter(deps Dependencies) http.Handler {
 		deps.Assets = assets.NewService(deps.DB.Pool())
 	}
 	if deps.Guardianship == nil {
-		deps.Guardianship = guardianship.NewService(deps.DB.Pool(), deps.Config)
+		deps.Guardianship = guardianship.NewService(deps.DB.Pool(), deps.Config, platformlogging.Named(baseLogger, "guardianship"))
 	}
 	if deps.Courses == nil {
-		deps.Courses = courses.NewService(deps.DB.Pool(), evaluation.NewOpenAICompatibleAdapter(deps.Config))
+		deps.Courses = courses.NewService(
+			deps.DB.Pool(),
+			evaluation.NewOpenAICompatibleAdapter(deps.Config, platformlogging.Named(baseLogger, "llm_evaluator")),
+			platformlogging.Named(baseLogger, "courses"),
+		)
 	}
 	if deps.LessonRuntime == nil {
-		deps.LessonRuntime = lessonruntime.NewService(deps.DB.Pool(), deps.Config, evaluation.NewOpenAICompatibleAdapter(deps.Config))
+		deps.LessonRuntime = lessonruntime.NewService(
+			deps.DB.Pool(),
+			deps.Config,
+			evaluation.NewOpenAICompatibleAdapter(deps.Config, platformlogging.Named(baseLogger, "llm_evaluator")),
+			platformlogging.Named(baseLogger, "lessonruntime"),
+		)
 	}
 	if deps.TeacherAccess == nil {
-		deps.TeacherAccess = teacheraccess.NewService(deps.DB.Pool(), deps.Config)
+		deps.TeacherAccess = teacheraccess.NewService(deps.DB.Pool(), deps.Config, platformlogging.Named(baseLogger, "teacheraccess"))
 	}
 	if deps.Commerce == nil {
 		deps.Commerce = commerce.NewService(deps.DB.Pool())

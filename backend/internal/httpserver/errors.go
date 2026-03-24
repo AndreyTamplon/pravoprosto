@@ -3,6 +3,7 @@ package httpserver
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type ErrorEnvelope struct {
@@ -25,11 +26,13 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeError(w http.ResponseWriter, status int, code string, message string, details map[string]any) {
+	requestID := strings.TrimSpace(w.Header().Get(requestIDHeader))
 	writeJSON(w, status, ErrorEnvelope{
 		Error: APIError{
-			Code:    code,
-			Message: message,
-			Details: details,
+			Code:      code,
+			Message:   message,
+			Details:   details,
+			RequestID: requestID,
 		},
 	})
 }

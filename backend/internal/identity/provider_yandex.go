@@ -5,16 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"golang.org/x/oauth2"
 	yandexOAuth "golang.org/x/oauth2/yandex"
+	platformlogging "pravoprost/backend/internal/platform/logging"
 )
 
 type YandexProvider struct {
 	oauthConfig oauth2.Config
 	httpClient  *http.Client
+	logger      *slog.Logger
 	// UserInfoURL can be overridden for testing
 	UserInfoURL string
 }
@@ -26,6 +29,7 @@ type YandexProviderConfig struct {
 	AuthURL     string
 	TokenURL    string
 	UserInfoURL string
+	Logger      *slog.Logger
 }
 
 func NewYandexProvider(cfg YandexProviderConfig) *YandexProvider {
@@ -47,6 +51,7 @@ func NewYandexProvider(cfg YandexProviderConfig) *YandexProvider {
 			Endpoint:     endpoint,
 		},
 		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		logger:      cfg.Logger,
 		UserInfoURL: userInfoURL,
 	}
 }
@@ -61,33 +66,39 @@ func (p *YandexProvider) AuthCodeURL(state string, redirectURI string) string {
 }
 
 func (p *YandexProvider) Exchange(ctx context.Context, code string, redirectURI string) (ResolvedIdentity, error) {
+	logger := platformlogging.FromContext(ctx, p.logger).With("provider", "yandex")
 	cfg := p.oauthConfig
 	cfg.RedirectURL = redirectURI
 
 	token, err := cfg.Exchange(ctx, code)
 	if err != nil {
+		logger.Warn("yandex token exchange failed", "err", err)
 		return ResolvedIdentity{}, fmt.Errorf("yandex token exchange: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.UserInfoURL+"?format=json", nil)
 	if err != nil {
+		logger.Error("failed to build yandex userinfo request", "err", err)
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo request: %w", err)
 	}
 	req.Header.Set("Authorization", "OAuth "+token.AccessToken)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		logger.Warn("yandex userinfo request failed", "err", err)
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo fetch: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		logger.Warn("yandex userinfo returned error status", "status", resp.StatusCode)
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.Warn("failed to read yandex userinfo response", "err", err)
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo read: %w", err)
 	}
 
@@ -104,9 +115,11 @@ func (p *YandexProvider) Exchange(ctx context.Context, code string, redirectURI 
 		PSUID        string   `json:"psuid"`
 	}
 	if err := json.Unmarshal(body, &profile); err != nil {
+		logger.Warn("failed to decode yandex userinfo response", "err", err)
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo decode: %w", err)
 	}
 	if profile.ID == "" {
+		logger.Warn("yandex userinfo response missing user id")
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo: empty user id")
 	}
 

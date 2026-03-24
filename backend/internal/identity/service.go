@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,11 +20,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	platformconfig "pravoprost/backend/internal/platform/config"
+	platformlogging "pravoprost/backend/internal/platform/logging"
 )
 
 type Service struct {
 	db        *pgxpool.Pool
 	config    platformconfig.Config
+	logger    *slog.Logger
 	providers *ProviderRegistry
 }
 
@@ -70,10 +72,11 @@ type StartResult struct {
 	RedirectURL string
 }
 
-func NewService(db *pgxpool.Pool, cfg platformconfig.Config, providers *ProviderRegistry) *Service {
+func NewService(db *pgxpool.Pool, cfg platformconfig.Config, providers *ProviderRegistry, logger *slog.Logger) *Service {
 	return &Service{
 		db:        db,
 		config:    cfg,
+		logger:    logger,
 		providers: providers,
 	}
 }
@@ -110,6 +113,7 @@ func (s *Service) SessionView(ctx context.Context, r *http.Request) (SessionView
 }
 
 func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (AuthenticatedSession, bool, bool, error) {
+	logger := platformlogging.FromContext(ctx, s.logger)
 	cookie, err := r.Cookie(s.config.SessionCookieName)
 	if err != nil {
 		if err == http.ErrNoCookie {
@@ -152,6 +156,7 @@ func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (Aut
 
 	if session.Status == "blocked" {
 		_, _ = s.db.Exec(ctx, `update sessions set revoked_at = now() where id = $1 and revoked_at is null`, session.SessionID)
+		logger.Warn("blocked account session revoked", "account_id", session.AccountID, "role", session.Role)
 		return AuthenticatedSession{}, false, true, nil
 	}
 	if !isActive {
@@ -159,7 +164,7 @@ func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (Aut
 	}
 
 	if _, err := s.db.Exec(ctx, `update sessions set last_seen_at = now() where id = $1`, session.SessionID); err != nil {
-		log.Printf("identity: update last_seen_at for session %s: %v", session.SessionID, err)
+		logger.Warn("failed to update session last_seen_at", "account_id", session.AccountID, "role", session.Role, "err", err)
 	}
 	return session, true, false, nil
 }

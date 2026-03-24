@@ -3,12 +3,14 @@ package httpserver
 import (
 	"context"
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"pravoprost/backend/internal/identity"
+	platformlogging "pravoprost/backend/internal/platform/logging"
 )
 
 type contextKey string
@@ -26,20 +28,29 @@ func sessionFromContext(ctx context.Context) (identity.AuthenticatedSession, boo
 
 func requireAuth(next http.HandlerFunc, deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		logger := requestLogger(r.Context(), deps.Logger)
 		session, ok, blocked, err := deps.Identity.AuthenticateRequest(r.Context(), r)
 		if err != nil {
+			logger.Error("request authentication failed", "err", err)
 			writeInternalError(w)
 			return
 		}
 		if blocked {
+			logger.Warn("blocked account attempted request")
 			writeError(w, http.StatusForbidden, "account_blocked", "Account is blocked", nil)
 			return
 		}
 		if !ok {
+			logger.Info("authentication required")
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required", nil)
 			return
 		}
-		next(w, r.WithContext(withSession(r.Context(), session)))
+		ctx := withSession(r.Context(), session)
+		ctx = platformlogging.WithContext(ctx, requestLogger(ctx, deps.Logger).With(
+			"account_id", session.AccountID,
+			"role", session.Role,
+		))
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -47,6 +58,7 @@ func requireRole(role string, deps Dependencies, next http.HandlerFunc) http.Han
 	return requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		session, _ := sessionFromContext(r.Context())
 		if session.Role != role {
+			requestLogger(r.Context(), deps.Logger).Warn("forbidden role access", "expected_role", role, "actual_role", session.Role)
 			writeError(w, http.StatusForbidden, "forbidden", "Forbidden", nil)
 			return
 		}
@@ -59,10 +71,12 @@ func requireTeacherReady(deps Dependencies, next http.HandlerFunc) http.HandlerF
 		session, _ := sessionFromContext(r.Context())
 		ready, err := deps.Courses.TeacherProfileReady(r.Context(), session.AccountID)
 		if err != nil {
+			requestLogger(r.Context(), deps.Logger).Error("teacher readiness check failed", "err", err)
 			writeInternalError(w)
 			return
 		}
 		if !ready {
+			requestLogger(r.Context(), deps.Logger).Info("teacher profile completion required")
 			writeError(w, http.StatusConflict, "teacher_profile_required", "Teacher profile must be completed first", nil)
 			return
 		}
@@ -79,6 +93,7 @@ func requireAnyRole(roles []string, deps Dependencies, next http.HandlerFunc) ht
 				return
 			}
 		}
+		requestLogger(r.Context(), deps.Logger).Warn("forbidden role access", "allowed_roles", strings.Join(roles, ","), "actual_role", session.Role)
 		writeError(w, http.StatusForbidden, "forbidden", "Forbidden", nil)
 	}, deps)
 }
@@ -87,10 +102,12 @@ func requireCSRF(next http.HandlerFunc, deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, ok := sessionFromContext(r.Context())
 		if !ok {
+			requestLogger(r.Context(), deps.Logger).Info("csrf check failed without authenticated session")
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required", nil)
 			return
 		}
 		if !secureEquals(r.Header.Get(deps.Config.CSRFHeaderName), session.CSRFSecret) {
+			requestLogger(r.Context(), deps.Logger).Warn("invalid csrf token")
 			writeError(w, http.StatusForbidden, "forbidden", "CSRF token missing or invalid", nil)
 			return
 		}
@@ -157,6 +174,7 @@ func rateLimitByIP(limit int, window time.Duration) func(http.Handler) http.Hand
 			}
 			if b.tokens <= 0 {
 				mu.Unlock()
+				requestLogger(r.Context(), nil).Warn("request rate limited")
 				writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests", nil)
 				return
 			}
@@ -166,6 +184,10 @@ func rateLimitByIP(limit int, window time.Duration) func(http.Handler) http.Hand
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func requestLogger(ctx context.Context, fallback *slog.Logger) *slog.Logger {
+	return platformlogging.FromContext(ctx, fallback)
 }
 
 func limitRequestBody(maxBytes int64) func(http.Handler) http.Handler {

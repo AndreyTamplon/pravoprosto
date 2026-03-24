@@ -13,6 +13,9 @@ type Config struct {
 	HTTPAddr              string
 	BaseURL               string
 	DatabaseURL           string
+	LogLevel              string
+	LogFormat             string
+	LogAddSource          bool
 	SigningSecret         string
 	SessionCookieName     string
 	CookieSecure          bool
@@ -40,6 +43,9 @@ func Load() Config {
 		HTTPAddr:              getEnv("PRAVO_HTTP_ADDR", ":8080"),
 		BaseURL:               getEnv("PRAVO_BASE_URL", "http://localhost:8080"),
 		DatabaseURL:           getEnv("PRAVO_DATABASE_URL", "postgres://postgres:postgres@localhost:5432/pravoprost?sslmode=disable"),
+		LogLevel:              getEnv("PRAVO_LOG_LEVEL", "info"),
+		LogFormat:             getEnv("PRAVO_LOG_FORMAT", ""),
+		LogAddSource:          getEnvBool("PRAVO_LOG_ADD_SOURCE", false),
 		SigningSecret:         getEnv("PRAVO_SIGNING_SECRET", "dev-signing-secret"),
 		SessionCookieName:     getEnv("PRAVO_SESSION_COOKIE_NAME", "pravoprost_session"),
 		CookieSecure:          getEnvBool("PRAVO_COOKIE_SECURE", true),

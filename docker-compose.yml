@@ -25,6 +25,9 @@ services:
       PRAVO_DATABASE_URL: postgres://pravoprost:${POSTGRES_PASSWORD}@postgres:5432/pravoprost?sslmode=disable
       PRAVO_HTTP_ADDR: ":8080"
       PRAVO_BASE_URL: ${BASE_URL}
+      PRAVO_LOG_LEVEL: ${LOG_LEVEL:-info}
+      PRAVO_LOG_FORMAT: ${LOG_FORMAT:-json}
+      PRAVO_LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
       PRAVO_SIGNING_SECRET: ${SIGNING_SECRET}
       PRAVO_COOKIE_SECURE: "true"
       PRAVO_LLM_BASE_URL: ${LLM_BASE_URL}
