@@ -37,7 +37,7 @@ test.describe('Gate 2 -- Parent-child progress flow', () => {
 
     // Verify courses section is shown
     // ChildProgress.tsx: <h2>Миссии</h2>
-    await expect(page.getByText('Миссии')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Миссии' })).toBeVisible();
 
     // Verify back button works
     // ChildProgress.tsx: <Button variant="ghost">← Назад</Button>

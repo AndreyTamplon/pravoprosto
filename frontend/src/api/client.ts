@@ -100,6 +100,7 @@ export async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
     headers: headers(false),
+    cache: 'no-store',
   });
   return handleResponse<T>(res);
 }

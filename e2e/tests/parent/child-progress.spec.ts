@@ -34,7 +34,7 @@ test.describe('Parent: Child progress', () => {
 
     // Should see "Миссии" section heading
     // ChildProgress.tsx: <h2>Миссии</h2>
-    await expect(page.getByText('Миссии')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Миссии' })).toBeVisible();
 
     // If the student has course progress, there should be progress bars
     // (from gate2 tests running first, student completed some lessons)

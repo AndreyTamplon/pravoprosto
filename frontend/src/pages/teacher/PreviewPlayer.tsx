@@ -141,7 +141,7 @@ export default function PreviewPlayer() {
 
         {completed && !answerResult && (
           <ComicPanel>
-            <div className={s.completedWrap}>
+            <div className={s.completedWrap} data-role="preview-complete">
               <div className={s.completedTitle}>Миссия завершена!</div>
               <div className={s.completedSub}>Предпросмотр этапа завершён</div>
               <div className={s.actionBar}>
@@ -153,14 +153,14 @@ export default function PreviewPlayer() {
 
         {!completed && currentStep && !answerResult && (
           <ComicPanel>
-            <div className={s.stepCard}>
+            <div className={s.stepCard} data-node-kind={currentStep.node_kind} data-role="current-node">
               <Badge variant={isStory ? 'teal' : isChoice ? 'orange' : isEnd ? 'lime' : 'pink'}>
                 {isStory ? 'История' : isChoice ? 'Вопрос' : isEnd ? 'Конец этапа' : 'Свободный ответ'}
               </Badge>
 
               {isStory && (
                 <>
-                  <div className={s.storyText}>{storyText}</div>
+                  <div className={s.storyText} data-role="prompt">{storyText}</div>
                   {illustrationUrl && (
                     <img src={illustrationUrl} alt="Иллюстрация" className={s.storyIllustration} />
                   )}
@@ -174,11 +174,13 @@ export default function PreviewPlayer() {
 
               {isChoice && (
                 <>
-                  <div className={s.questionText}>{questionText}</div>
+                  <div className={s.questionText} data-role="prompt">{questionText}</div>
                   <div className={s.optionsList}>
                     {options?.map(option => (
                       <button
                         key={option.id}
+                        data-role="option"
+                        data-option-id={option.id}
                         className={`${s.optionBtn} ${selectedOption === option.id ? s.selected : ''}`}
                         onClick={() => setSelectedOption(option.id)}
                         type="button"
@@ -197,7 +199,7 @@ export default function PreviewPlayer() {
 
               {isFreeText && (
                 <>
-                  <div className={s.questionText}>{questionText}</div>
+                  <div className={s.questionText} data-role="prompt">{questionText}</div>
                   <textarea
                     className={s.freeTextInput}
                     value={freeTextAnswer}
@@ -214,7 +216,7 @@ export default function PreviewPlayer() {
 
               {isEnd && (
                 <>
-                  <div className={s.storyText}>{storyText || 'Конец этапа'}</div>
+                  <div className={s.storyText} data-role="prompt">{storyText || 'Конец этапа'}</div>
                   <div className={s.actionBar}>
                     <Button onClick={handleNext}>Завершить предпросмотр</Button>
                   </div>
@@ -235,6 +237,8 @@ export default function PreviewPlayer() {
                     ? s.feedbackPartial
                     : s.feedbackIncorrect
                 }`}
+                data-role="feedback"
+                data-verdict={answerResult.verdict}
               >
                 <div className={s.feedbackVerdict}>
                   {answerResult.verdict === 'correct'

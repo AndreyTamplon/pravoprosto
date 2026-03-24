@@ -100,6 +100,12 @@
   gap: 6px;
 }
 
+.optionBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .nodeFieldLabel {
   font-weight: 700;
   font-size: 0.85rem;
@@ -139,6 +145,14 @@
   flex: 1;
 }
 
+.optionInput {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #1E293B;
+  border-radius: 8px;
+  font-family: var(--font-family);
+}
+
 .optionCorrect {
   display: flex;
   align-items: center;
@@ -152,6 +166,9 @@
   font-size: 0.82rem;
   color: var(--gray-500);
   padding: 4px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .addNodeBar {

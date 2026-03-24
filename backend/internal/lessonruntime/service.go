@@ -464,16 +464,16 @@ func (s *Service) Next(ctx context.Context, studentID string, sessionID string, 
 		return StepView{}, err
 	}
 	defer tx.Rollback(ctx)
-	var courseID, revisionID, lessonID, currentNodeID string
+	var courseID, revisionID, lessonID, currentNodeID, courseProgressID string
 	var currentVersion int64
 	var status string
 	if err := tx.QueryRow(ctx, `
-		select cp.course_id::text, ls.course_revision_id::text, ls.lesson_id, ls.current_node_id, ls.state_version, ls.status
+		select cp.course_id::text, ls.course_revision_id::text, ls.lesson_id, ls.current_node_id, ls.state_version, ls.status, cp.id::text
 		from lesson_sessions ls
 		join course_progress cp on cp.id = ls.course_progress_id
 		where ls.id = $1 and ls.student_id = $2
 		for update
-	`, sessionID, studentID).Scan(&courseID, &revisionID, &lessonID, &currentNodeID, &currentVersion, &status); err != nil {
+	`, sessionID, studentID).Scan(&courseID, &revisionID, &lessonID, &currentNodeID, &currentVersion, &status, &courseProgressID); err != nil {
 		if err == pgx.ErrNoRows {
 			return StepView{}, ErrLessonSessionNotFound
 		}
@@ -495,6 +495,14 @@ func (s *Service) Next(ctx context.Context, studentID string, sessionID string, 
 	if currentVersion != stateVersion || currentNodeID != expectedNodeID {
 		priorNode := graph.NodeMap[expectedNodeID]
 		if currentVersion == stateVersion+1 && priorNode.Kind == "story" && priorNode.NextNodeID != "" && currentNodeID == priorNode.NextNodeID {
+			currentNode := graph.NodeMap[currentNodeID]
+			if currentNode.Kind == "end" {
+				completion, err := s.completeLessonTx(ctx, tx, studentID, sessionID, courseProgressID, lessonID, 0, graph, currentNode.Text)
+				if err != nil {
+					return StepView{}, err
+				}
+				_ = completion
+			}
 			state, err := s.ensureGameStateTx(ctx, tx, studentID)
 			if err != nil {
 				return StepView{}, err
@@ -512,11 +520,25 @@ func (s *Service) Next(ctx context.Context, studentID string, sessionID string, 
 	}
 	nextNode := graph.NodeMap[node.NextNodeID]
 	newVersion := currentVersion + 1
-	if _, err := tx.Exec(ctx, `update lesson_sessions set current_node_id = $2, state_version = $3, last_activity_at = now() where id = $1`, sessionID, node.NextNodeID, newVersion); err != nil {
-		return StepView{}, err
-	}
 	state, err := s.ensureGameStateTx(ctx, tx, studentID)
 	if err != nil {
+		return StepView{}, err
+	}
+	if nextNode.Kind == "end" {
+		if _, err := tx.Exec(ctx, `update lesson_sessions set current_node_id = $2, state_version = $3, last_activity_at = now() where id = $1`, sessionID, nextNode.ID, newVersion); err != nil {
+			return StepView{}, err
+		}
+		completion, err := s.completeLessonTx(ctx, tx, studentID, sessionID, courseProgressID, lessonID, 0, graph, nextNode.Text)
+		if err != nil {
+			return StepView{}, err
+		}
+		_ = completion
+		if err := tx.Commit(ctx); err != nil {
+			return StepView{}, err
+		}
+		return renderStep(sessionID, courseID, lessonID, newVersion, graph, nextNode.ID, state), nil
+	}
+	if _, err := tx.Exec(ctx, `update lesson_sessions set current_node_id = $2, state_version = $3, last_activity_at = now() where id = $1`, sessionID, node.NextNodeID, newVersion); err != nil {
 		return StepView{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -664,7 +686,7 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 	}
 	nextNode := graph.NodeMap[evaluationResult.NextNodeID]
 	if nextNode.Kind == "end" {
-		completion, err := s.completeLessonTx(ctx, tx, studentID, sessionID, courseProgressID, lessonID, xpDelta, graph)
+		completion, err := s.completeLessonTx(ctx, tx, studentID, sessionID, courseProgressID, lessonID, xpDelta, graph, nextNode.Text)
 		if err != nil {
 			return AnswerOutcome{}, err
 		}

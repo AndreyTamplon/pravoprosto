@@ -202,6 +202,9 @@ func buildTreeModules(s *Service, content json.RawMessage, db txLike, ctx contex
 				return nil, err
 			}
 			accessState := commercialState
+			if status == "completed" {
+				accessState = "completed"
+			}
 			if !allPreviousCompleted && status == "not_started" {
 				accessState = "locked_prerequisite"
 			}
@@ -494,6 +497,9 @@ func renderStep(sessionID string, courseID string, lessonID string, stateVersion
 	for i, id := range graph.Order {
 		if id == nodeID {
 			completed = i
+			if node.Kind == "end" {
+				completed = i + 1
+			}
 			break
 		}
 	}
@@ -695,7 +701,7 @@ func (s *Service) applyGameMutationTx(ctx context.Context, tx pgx.Tx, studentID 
 	return nil
 }
 
-func (s *Service) completeLessonTx(ctx context.Context, tx pgx.Tx, studentID string, sessionID string, courseProgressID string, lessonID string, xpDelta int, graph runtimeGraph) (map[string]any, error) {
+func (s *Service) completeLessonTx(ctx context.Context, tx pgx.Tx, studentID string, sessionID string, courseProgressID string, lessonID string, xpDelta int, graph runtimeGraph, endText string) (map[string]any, error) {
 	if _, err := tx.Exec(ctx, `update lesson_sessions set status = 'completed', completed_at = now(), last_activity_at = now() where id = $1`, sessionID); err != nil {
 		return nil, err
 	}
@@ -758,14 +764,18 @@ func (s *Service) completeLessonTx(ctx context.Context, tx pgx.Tx, studentID str
 			return nil, err
 		}
 	}
-	return map[string]any{
+	completion := map[string]any{
 		"lesson_id":           lessonID,
 		"accuracy_percent":    100,
 		"time_spent_seconds":  len(graph.Order) * 10,
 		"lesson_xp_earned":    xpDelta,
 		"current_streak_days": streakCurrent,
 		"next_lesson_id":      nil,
-	}, nil
+	}
+	if strings.TrimSpace(endText) != "" {
+		completion["end_text"] = endText
+	}
+	return completion, nil
 }
 
 func (s *Service) activeOrLatestCourseProgressTx(ctx context.Context, tx pgx.Tx, studentID string, courseID string) (string, string, error) {

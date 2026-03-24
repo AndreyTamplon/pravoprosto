@@ -241,6 +241,14 @@
   color: var(--teal);
 }
 
+.completeSummary {
+  max-width: 520px;
+  text-align: center;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--dark-light);
+}
+
 .completeStats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

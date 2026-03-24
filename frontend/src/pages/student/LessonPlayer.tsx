@@ -22,6 +22,7 @@ type PlayerScreen =
   | { kind: 'story'; step: StepView }
   | { kind: 'single_choice'; step: StepView }
   | { kind: 'free_text'; step: StepView }
+  | { kind: 'end'; step: StepView }
   | { kind: 'checking' }
   | { kind: 'feedback'; result: AnswerOutcome }
   | { kind: 'complete'; completion: Record<string, unknown> | null }
@@ -160,6 +161,9 @@ export default function LessonPlayer() {
       case 'free_text':
         setScreen({ kind: 'free_text', step });
         break;
+      case 'end':
+        setScreen({ kind: 'end', step });
+        break;
       default:
         setScreen({ kind: 'error', message: `Unknown step type: ${step.node_kind}` });
     }
@@ -214,6 +218,7 @@ export default function LessonPlayer() {
 
       // Update hearts from the answer outcome game_state
       const newHearts = result.game_state.hearts_current;
+      setCurrentStep((step) => (step ? { ...step, game_state: result.game_state } : step));
       setGameState((gs) => gs ? { ...gs, hearts_current: newHearts, hearts_restore_at: result.game_state.hearts_restore_at } : gs);
 
       // Check if hearts are depleted
@@ -245,15 +250,24 @@ export default function LessonPlayer() {
     if (result.next_action === 'lesson_completed' || result.next_action === 'completed') {
       setScreen({ kind: 'complete', completion: result.lesson_completion });
     } else if (result.next_step) {
+      setCurrentStep(result.next_step);
       transitionToStep(result.next_step);
     } else {
       setScreen({ kind: 'error', message: 'No next step available' });
     }
   };
 
+  const handleEndComplete = () => {
+    setScreen({ kind: 'complete', completion: null });
+  };
+
   // Close / exit
   const handleClose = () => {
-    navigate(`/student/courses/${courseId}`);
+    if (courseId) {
+      window.location.assign(`/student/courses/${courseId}`);
+      return;
+    }
+    navigate('/student/courses');
   };
 
   // Compute elapsed time
@@ -263,12 +277,12 @@ export default function LessonPlayer() {
   // Render HudBar
   const hearts = currentStep?.game_state?.hearts_current ?? gameState?.hearts_current ?? 5;
   const heartsMax = currentStep?.game_state?.hearts_max ?? gameState?.hearts_max ?? 5;
-  const xp = (currentStep?.game_state?.xp_total ?? gameState?.xp_total ?? 0) + sessionXp;
+  const xp = currentStep?.game_state?.xp_total ?? gameState?.xp_total ?? 0;
   const streak = gameState?.current_streak_days ?? 0;
   const progress = currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
 
   // Extract payload helpers
-  const payload = (screen.kind === 'story' || screen.kind === 'single_choice' || screen.kind === 'free_text')
+  const payload = (screen.kind === 'story' || screen.kind === 'single_choice' || screen.kind === 'free_text' || screen.kind === 'end')
     ? screen.step.payload
     : {};
 
@@ -300,7 +314,7 @@ export default function LessonPlayer() {
 
         {/* Story */}
         {screen.kind === 'story' && (
-          <div className={styles.storyScreen}>
+          <div className={styles.storyScreen} data-node-kind="story" data-role="current-node">
             {illustrationUrl && (
               <div className={styles.storyIllustration}>
                 <img
@@ -318,7 +332,7 @@ export default function LessonPlayer() {
               {storySpeaker && (
                 <div className={styles.storySpeaker}>{storySpeaker}</div>
               )}
-              <div className={styles.storyText}>{storyText}</div>
+              <div className={styles.storyText} data-role="prompt">{storyText}</div>
             </SpeechBubble>
 
             <div className={styles.storyActions}>
@@ -335,14 +349,14 @@ export default function LessonPlayer() {
 
         {/* Single Choice */}
         {screen.kind === 'single_choice' && (
-          <div className={styles.questionScreen}>
+          <div className={styles.questionScreen} data-node-kind="single_choice" data-role="current-node">
             {illustrationUrl && (
               <div className={styles.questionIllustration}>
                 <img src={illustrationUrl} alt="Иллюстрация" style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />
               </div>
             )}
 
-            <div className={styles.questionText}>
+            <div className={styles.questionText} data-role="prompt">
               {questionText}
             </div>
 
@@ -351,6 +365,8 @@ export default function LessonPlayer() {
                 <button
                   key={opt.id}
                   type="button"
+                  data-role="option"
+                  data-option-id={opt.id}
                   className={[
                     styles.option,
                     selectedOption === opt.id ? styles.optionSelected : '',
@@ -379,14 +395,14 @@ export default function LessonPlayer() {
 
         {/* Free Text */}
         {screen.kind === 'free_text' && (
-          <div className={styles.questionScreen}>
+          <div className={styles.questionScreen} data-node-kind="free_text" data-role="current-node">
             {illustrationUrl && (
               <div className={styles.questionIllustration}>
                 <img src={illustrationUrl} alt="Иллюстрация" style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />
               </div>
             )}
 
-            <div className={styles.questionText}>
+            <div className={styles.questionText} data-role="prompt">
               {questionText}
             </div>
 
@@ -410,6 +426,27 @@ export default function LessonPlayer() {
           </div>
         )}
 
+        {/* Terminal node */}
+        {screen.kind === 'end' && (
+          <div className={styles.storyScreen} data-node-kind="end" data-role="current-node">
+            <SpeechBubble direction="bottom">
+              <div className={styles.storyText} data-role="prompt">
+                {storyText || 'Миссия завершена!'}
+              </div>
+            </SpeechBubble>
+
+            <div className={styles.storyActions}>
+              <Button
+                variant="primary"
+                onClick={handleEndComplete}
+                disabled={submitting}
+              >
+                Завершить миссию
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Checking (LLM evaluation) */}
         {screen.kind === 'checking' && (
           <div className={styles.loadingScreen}>
@@ -420,7 +457,7 @@ export default function LessonPlayer() {
 
         {/* Hearts Empty */}
         {screen.kind === 'hearts_empty' && (
-          <div className={styles.heartsEmptyScreen}>
+          <div className={styles.heartsEmptyScreen} data-role="hearts-empty">
             <div className={styles.heartsEmptyMascot}>😢</div>
             <div className={styles.heartsEmptyTitle}>Жизни закончились 💔</div>
             <div className={styles.heartsEmptyDesc}>
@@ -437,9 +474,12 @@ export default function LessonPlayer() {
         {screen.kind === 'complete' && (
           <>
             <Confetti />
-            <div className={styles.completeScreen}>
+            <div className={styles.completeScreen} data-role="lesson-complete">
               <div className={styles.completeMascot}>🎉🤖🏆</div>
               <div className={styles.completeTitle}>Миссия выполнена!</div>
+              {typeof screen.completion?.end_text === 'string' && screen.completion.end_text.trim() !== '' && (
+                <div className={styles.completeSummary}>{screen.completion.end_text as string}</div>
+              )}
 
               <div className={styles.completeStats}>
                 <div className={styles.completeStat}>
@@ -485,7 +525,7 @@ export default function LessonPlayer() {
       </div>
 
       {/* Feedback Overlay */}
-      {screen.kind === 'feedback' && (
+        {screen.kind === 'feedback' && (
         <div className={styles.feedbackOverlay}>
           <div
             className={[
@@ -496,6 +536,8 @@ export default function LessonPlayer() {
                 ? styles.feedbackPartial
                 : styles.feedbackIncorrect,
             ].join(' ')}
+            data-role="feedback"
+            data-verdict={screen.result.verdict}
           >
             <div className={styles.feedbackBurst}>
               <ComicBurst>

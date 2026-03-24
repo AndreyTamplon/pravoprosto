@@ -11,9 +11,14 @@ import { fileURLToPath } from 'node:url';
  */
 
 const BASE_URL = process.env.PRAVO_BASE_URL ?? `http://localhost:${process.env.E2E_BACKEND_PORT ?? '3080'}`;
+const PG_HOST = process.env.PG_HOST ?? 'localhost';
+const PG_PORT = process.env.PG_PORT ?? '5432';
+const PG_USER = process.env.PG_USER ?? 'postgres';
+const PG_PASSWORD = process.env.PG_PASSWORD ?? 'postgres';
+const DB_NAME = process.env.DB_NAME ?? 'pravoprost_e2e';
 const DB_URL =
   process.env.PRAVO_DATABASE_URL ??
-  'postgres://postgres:postgres@localhost:5432/pravoprost_e2e?sslmode=disable';
+  `postgres://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${DB_NAME}?sslmode=disable`;
 
 function getDir(): string {
   try {
@@ -31,7 +36,7 @@ export function psqlExec(sql: string): string {
     encoding: 'utf-8',
     env: {
       ...process.env,
-      PGPASSWORD: process.env.PG_PASSWORD ?? 'postgres',
+      PGPASSWORD: PG_PASSWORD,
     },
   }).trim();
 }

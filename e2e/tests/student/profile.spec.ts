@@ -8,8 +8,9 @@ test.describe('Student -- Profile page', () => {
   });
 
   test('display name is visible', async ({ page }) => {
-    // 1. Display name "Алиса" should be visible (seeded profile)
-    await expect(page.getByText('Алиса')).toBeVisible();
+    const displayName = page.locator('[class*="displayName"]').first();
+    await expect(displayName).toBeVisible();
+    await expect(displayName).not.toHaveText('');
   });
 
   test('XP, level, and streak stats are shown', async ({ page }) => {
@@ -29,16 +30,21 @@ test.describe('Student -- Profile page', () => {
   });
 
   test('can start editing display name', async ({ page }) => {
+    const originalName = (await page.locator('[class*="displayName"]').first().textContent())?.trim() ?? '';
+    expect(originalName).not.toBe('');
+
     // 3. Click "Изменить имя" to enter edit mode
     await page.getByRole('button', { name: 'Изменить имя' }).click();
 
     // An input should appear with the current name
     const editInput = page.locator('input[class*="editInput"]');
     await expect(editInput).toBeVisible();
-    await expect(editInput).toHaveValue('Алиса');
+    await expect(editInput).toHaveValue(originalName);
   });
 
   test('can edit and save display name', async ({ page }) => {
+    const originalName = (await page.locator('[class*="displayName"]').first().textContent())?.trim() ?? 'Алиса';
+
     // 3 & 4. Edit the name and save
     await page.getByRole('button', { name: 'Изменить имя' }).click();
 
@@ -56,12 +62,13 @@ test.describe('Student -- Profile page', () => {
     await page.getByRole('button', { name: 'Изменить имя' }).click();
     const restoreInput = page.locator('input[class*="editInput"]');
     await restoreInput.clear();
-    await restoreInput.fill('Алиса');
+    await restoreInput.fill(originalName);
     await page.getByRole('button', { name: 'OK' }).click();
-    await expect(page.getByText('Алиса')).toBeVisible();
+    await expect(page.locator('[class*="displayName"]').first()).toHaveText(originalName);
   });
 
   test('can cancel name editing', async ({ page }) => {
+    const originalName = (await page.locator('[class*="displayName"]').first().textContent())?.trim() ?? '';
     await page.getByRole('button', { name: 'Изменить имя' }).click();
 
     const editInput = page.locator('input[class*="editInput"]');
@@ -72,7 +79,7 @@ test.describe('Student -- Profile page', () => {
     await page.getByRole('button', { name: '✕' }).click();
 
     // Original name should still be displayed
-    await expect(page.getByText('Алиса')).toBeVisible();
+    await expect(page.locator('[class*="displayName"]').first()).toHaveText(originalName);
     await expect(page.getByText('Should Not Save')).not.toBeVisible();
   });
 

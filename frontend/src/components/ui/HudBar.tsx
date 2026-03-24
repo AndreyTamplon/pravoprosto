@@ -34,13 +34,18 @@ export function HudBar({
       </div>
 
       <div className={styles.stats}>
-        <span className={`${styles.stat} ${styles.hearts}`}>
+        <span
+          className={`${styles.stat} ${styles.hearts}`}
+          data-role="hearts"
+          data-remaining={hearts}
+          data-max={heartsMax}
+        >
           ♥ {hearts}/{heartsMax}
         </span>
-        <span className={`${styles.stat} ${styles.xp}`}>
+        <span className={`${styles.stat} ${styles.xp}`} data-role="xp" data-value={xp}>
           ★ {xp}
         </span>
-        <span className={`${styles.stat} ${styles.streak}`}>
+        <span className={`${styles.stat} ${styles.streak}`} data-role="streak" data-value={streak}>
           🔥 {streak}
         </span>
       </div>

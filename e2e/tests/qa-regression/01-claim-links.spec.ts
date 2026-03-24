@@ -176,4 +176,22 @@ test.describe('QA Bug 1: Claim links use real auth redirect and hash-token claim
     await anonymousContext.close();
     await parentContext.close();
   });
+
+  test('authenticated non-student sees a clear Russian error instead of broken course claim flow', async ({ browser }) => {
+    const teacherContext = await browser.newContext({ storageState: '.auth/teacher.json' });
+    const claimLink = await createTeacherCourseLink(teacherContext);
+    await teacherContext.close();
+
+    const parentContext = await browser.newContext({ storageState: '.auth/parent.json' });
+    const parentPage = await parentContext.newPage();
+
+    await parentPage.goto(claimLink);
+    await expect(parentPage).toHaveURL(/\/claim\/course-link/);
+    await expect(parentPage.getByRole('heading', { name: 'Ошибка' })).toBeVisible({ timeout: 10000 });
+    await expect(parentPage.getByText('Ссылку может активировать только ученик.')).toBeVisible();
+    await expect(parentPage.getByRole('button', { name: 'На главную' })).toBeVisible();
+    await expect(parentPage).not.toHaveURL(/\/student\/courses/);
+
+    await parentContext.close();
+  });
 });

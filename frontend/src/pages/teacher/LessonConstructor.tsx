@@ -6,9 +6,26 @@ import {
   updateTeacherDraft,
   createTeacherPreview,
 } from '../../api/client';
-import type { CourseDraft, ContentModule, GraphNode, GraphEdge, LessonGraph } from '../../api/types';
-import { graphToBackendFormat, graphFromBackendFormat, isBackendLessonGraph } from '../../api/types';
-import { Button, ComicPanel, Badge, Spinner, Textarea, Modal } from '../../components/ui';
+import type {
+  CourseDraft,
+  ContentModule,
+  GraphNode,
+  LessonGraph,
+  ChoiceOption,
+  GraphVerdict,
+} from '../../api/types';
+import {
+  graphToBackendFormat,
+  graphFromBackendFormat,
+  isBackendLessonGraph,
+  normalizeLessonGraph,
+  optionEdgeCondition,
+  verdictEdgeCondition,
+  getGraphEdgeTargetWithFallback,
+  setGraphEdgeTarget,
+  getForwardTargetNodes,
+} from '../../api/types';
+import { Button, ComicPanel, Badge, Spinner, Textarea, Modal, Select } from '../../components/ui';
 import { getDraftValidationErrors } from '../../utils/editorErrors';
 import s from './LessonConstructor.module.css';
 
@@ -19,11 +36,6 @@ function genId(): string {
 interface StoryData {
   text: string;
   illustration_url?: string;
-}
-
-interface ChoiceOption {
-  option_id: string;
-  text: string;
 }
 
 interface SingleChoiceData {
@@ -93,6 +105,16 @@ function isPlaceholderGraph(graph: LessonGraph): boolean {
   );
 }
 
+function nodeDisplayLabel(nodes: GraphNode[], nodeId: string): string {
+  const index = nodes.findIndex(node => node.id === nodeId);
+  const node = nodes[index];
+  if (!node) {
+    return nodeId;
+  }
+  const label = nodeTypeLabels[node.type]?.label ?? node.type;
+  return `#${index + 1} ${label}`;
+}
+
 export default function LessonConstructor() {
   const { courseId, lessonId } = useParams<{
     courseId: string;
@@ -107,9 +129,7 @@ export default function LessonConstructor() {
   );
 
   const [lessonTitle, setLessonTitle] = useState('');
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
-  const [startNodeId, setStartNodeId] = useState('');
+  const [graph, setGraph] = useState<LessonGraph>({ startNodeId: '', nodes: [], edges: [] });
   const [draftVersion, setDraftVersion] = useState(0);
 
   const [saving, setSaving] = useState(false);
@@ -118,6 +138,10 @@ export default function LessonConstructor() {
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
+  const nodes = graph.nodes;
+  const edges = graph.edges;
+  const startNodeId = graph.startNodeId;
 
   // Find our lesson in the draft (scan all modules for lessonId)
   const moduleId = draft?.content_json?.modules?.find(
@@ -136,24 +160,16 @@ export default function LessonConstructor() {
         if (isBackendLessonGraph(rawGraph)) {
           const converted = graphFromBackendFormat(rawGraph);
           if (isPlaceholderGraph(converted)) {
-            setNodes([]);
-            setEdges([]);
-            setStartNodeId('');
+            setGraph({ startNodeId: '', nodes: [], edges: [] });
           } else {
-            setNodes(converted.nodes);
-            setEdges(converted.edges);
-            setStartNodeId(converted.startNodeId);
+            setGraph(normalizeLessonGraph(converted));
           }
         } else {
-          const editorGraph = lesson.graph ?? { startNodeId: '', nodes: [], edges: [] };
+          const editorGraph = normalizeLessonGraph(lesson.graph ?? { startNodeId: '', nodes: [], edges: [] });
           if (isPlaceholderGraph(editorGraph)) {
-            setNodes([]);
-            setEdges([]);
-            setStartNodeId('');
+            setGraph({ startNodeId: '', nodes: [], edges: [] });
           } else {
-            setNodes(editorGraph.nodes ?? []);
-            setEdges(editorGraph.edges ?? []);
-            setStartNodeId(editorGraph.startNodeId ?? '');
+            setGraph(editorGraph);
           }
         }
         break;
@@ -161,38 +177,9 @@ export default function LessonConstructor() {
     }
   }, [draft, lessonId]);
 
-  // Auto-compute edges: simple linear DAG
-  const recomputeEdges = useCallback((nodeList: GraphNode[]): GraphEdge[] => {
-    const newEdges: GraphEdge[] = [];
-    for (let i = 0; i < nodeList.length - 1; i++) {
-      const from = nodeList[i];
-      const to = nodeList[i + 1];
-      if (from.type === 'single_choice') {
-        // Conditional edges: correct -> next, incorrect -> next
-        newEdges.push({ from: from.id, to: to.id, condition: 'any' });
-      } else if (from.type === 'free_text') {
-        newEdges.push({ from: from.id, to: to.id, condition: 'any' });
-      } else {
-        newEdges.push({ from: from.id, to: to.id });
-      }
-    }
-    return newEdges;
+  const updateGraph = useCallback((updater: (prev: LessonGraph) => LessonGraph) => {
+    setGraph(prev => normalizeLessonGraph(updater(prev)));
   }, []);
-
-  // Update nodes + recompute edges
-  const updateNodes = useCallback(
-    (updater: (prev: GraphNode[]) => GraphNode[]) => {
-      setNodes(prev => {
-        const next = updater(prev);
-        setEdges(recomputeEdges(next));
-        if (next.length > 0 && (!startNodeId || !next.find(n => n.id === startNodeId))) {
-          setStartNodeId(next[0].id);
-        }
-        return next;
-      });
-    },
-    [recomputeEdges, startNodeId],
-  );
 
   // Node CRUD
   const addNode = (type: GraphNode['type']) => {
@@ -210,7 +197,7 @@ export default function LessonConstructor() {
         ],
         correct_option_id: opt1Id,
         feedback_correct: 'Правильно!',
-        feedback_incorrect: 'Попробуйте ещё раз',
+        feedback_incorrect: 'Неправильно.',
       };
     } else if (type === 'free_text') {
       newNode.data = {
@@ -222,89 +209,182 @@ export default function LessonConstructor() {
     } else if (type === 'terminal') {
       newNode.data = { text: 'Миссия завершена!' };
     }
-    updateNodes(prev => [...prev, newNode]);
+    updateGraph(prev => {
+      if (type === 'terminal' && prev.nodes.some(node => node.type === 'terminal')) {
+        return prev;
+      }
+      const terminalNode = prev.nodes.find(node => node.type === 'terminal');
+      const previousContentNode =
+        type !== 'terminal'
+          ? [...prev.nodes.filter(node => node.type !== 'terminal')].at(-1)
+          : undefined;
+      const nextNodes =
+        type !== 'terminal' && terminalNode
+          ? [...prev.nodes.filter(node => node.id !== terminalNode.id), newNode, terminalNode]
+          : [...prev.nodes, newNode];
+      const nextEdges =
+        type !== 'terminal' && terminalNode && previousContentNode
+          ? prev.edges.map(edge =>
+              edge.from === previousContentNode.id && edge.to === terminalNode.id
+                ? { ...edge, to: newNode.id }
+                : edge,
+            )
+          : prev.edges;
+      return {
+        ...prev,
+        nodes: nextNodes,
+        edges: nextEdges,
+        startNodeId: prev.startNodeId || (nextNodes[0]?.id ?? ''),
+      };
+    });
   };
 
   const removeNode = (nodeId: string) => {
     setConfirmAction({
       message: 'Удалить этот блок?',
-      onConfirm: () => { setConfirmAction(null); updateNodes(prev => prev.filter(n => n.id !== nodeId)); },
+      onConfirm: () => {
+        setConfirmAction(null);
+        updateGraph(prev => {
+          const nextNodes = prev.nodes.filter(node => node.id !== nodeId);
+          const nextEdges = prev.edges.filter(edge => edge.from !== nodeId && edge.to !== nodeId);
+          return {
+            ...prev,
+            nodes: nextNodes,
+            edges: nextEdges,
+            startNodeId: prev.startNodeId === nodeId ? (nextNodes[0]?.id ?? '') : prev.startNodeId,
+          };
+        });
+      },
     });
   };
 
   const moveNodeUp = (idx: number) => {
     if (idx === 0) return;
-    updateNodes(prev => {
-      const arr = [...prev];
+    updateGraph(prev => {
+      const arr = [...prev.nodes];
       [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
-      return arr;
+      return { ...prev, nodes: arr };
     });
   };
 
   const moveNodeDown = (idx: number) => {
-    updateNodes(prev => {
-      if (idx >= prev.length - 1) return prev;
-      const arr = [...prev];
+    updateGraph(prev => {
+      if (idx >= prev.nodes.length - 1) return prev;
+      const arr = [...prev.nodes];
       [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
-      return arr;
+      return { ...prev, nodes: arr };
     });
   };
 
   const updateNodeData = (nodeId: string, field: string, value: unknown) => {
-    setNodes(prev =>
-      prev.map(n => (n.id === nodeId ? { ...n, data: { ...n.data, [field]: value } } : n)),
-    );
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node =>
+        node.id === nodeId ? { ...node, data: { ...node.data, [field]: value } } : node,
+      ),
+    }));
   };
 
   // Choice option helpers
   const addOption = (nodeId: string) => {
-    setNodes(prev =>
-      prev.map(n => {
-        if (n.id !== nodeId) return n;
-        const opts = (n.data.options as ChoiceOption[]) ?? [];
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const opts = (node.data.options as ChoiceOption[]) ?? [];
         return {
-          ...n,
+          ...node,
           data: {
-            ...n.data,
+            ...node.data,
             options: [...opts, { option_id: genId(), text: '' }],
           },
         };
       }),
-    );
+    }));
   };
 
   const removeOption = (nodeId: string, optionId: string) => {
-    setNodes(prev =>
-      prev.map(n => {
-        if (n.id !== nodeId) return n;
-        const opts = ((n.data.options as ChoiceOption[]) ?? []).filter(o => o.option_id !== optionId);
-        const correctId = n.data.correct_option_id as string;
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const opts = ((node.data.options as ChoiceOption[]) ?? []).filter(option => option.option_id !== optionId);
+        const correctId = node.data.correct_option_id as string;
         return {
-          ...n,
+          ...node,
           data: {
-            ...n.data,
+            ...node.data,
             options: opts,
             correct_option_id: correctId === optionId ? (opts[0]?.option_id ?? '') : correctId,
           },
         };
       }),
-    );
+      edges: prev.edges.filter(edge => !(
+        edge.from === nodeId
+        && edge.condition === optionEdgeCondition(optionId)
+      )),
+    }));
   };
 
   const updateOptionText = (nodeId: string, optionId: string, text: string) => {
-    setNodes(prev =>
-      prev.map(n => {
-        if (n.id !== nodeId) return n;
-        const opts = ((n.data.options as ChoiceOption[]) ?? []).map(o =>
-          o.option_id === optionId ? { ...o, text } : o,
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const opts = ((node.data.options as ChoiceOption[]) ?? []).map(option =>
+          option.option_id === optionId ? { ...option, text } : option,
         );
-        return { ...n, data: { ...n.data, options: opts } };
+        return { ...node, data: { ...node.data, options: opts } };
       }),
-    );
+    }));
   };
 
   const setCorrectOption = (nodeId: string, optionId: string) => {
     updateNodeData(nodeId, 'correct_option_id', optionId);
+  };
+
+  const setStoryNextNode = (nodeId: string, targetId: string) => {
+    updateGraph(prev => ({
+      ...prev,
+      edges: setGraphEdgeTarget(prev.edges, nodeId, undefined, targetId),
+    }));
+  };
+
+  const setOptionNextNode = (nodeId: string, optionId: string, targetId: string) => {
+    updateGraph(prev => ({
+      ...prev,
+      edges: setGraphEdgeTarget(prev.edges, nodeId, optionEdgeCondition(optionId), targetId),
+    }));
+  };
+
+  const setFreeTextNextNode = (nodeId: string, verdict: GraphVerdict, targetId: string) => {
+    updateGraph(prev => ({
+      ...prev,
+      edges: setGraphEdgeTarget(prev.edges, nodeId, verdictEdgeCondition(verdict), targetId),
+    }));
+  };
+
+  const describeOutgoingEdges = (node: GraphNode): string[] => {
+    if (node.type === 'story') {
+      const targetId = getGraphEdgeTargetWithFallback(edges, node.id);
+      return targetId ? [`Далее -> ${nodeDisplayLabel(nodes, targetId)}`] : [];
+    }
+    if (node.type === 'single_choice') {
+      const cd = choiceData(node);
+      return cd.options.flatMap(option => {
+        const targetId = getGraphEdgeTargetWithFallback(edges, node.id, optionEdgeCondition(option.option_id));
+        if (!targetId) return [];
+        return [`${option.text || 'Без текста'} -> ${nodeDisplayLabel(nodes, targetId)}`];
+      });
+    }
+    if (node.type === 'free_text') {
+      return (['correct', 'partial', 'incorrect'] as GraphVerdict[]).flatMap(verdict => {
+        const targetId = getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition(verdict));
+        if (!targetId) return [];
+        return [`${verdict} -> ${nodeDisplayLabel(nodes, targetId)}`];
+      });
+    }
+    return [];
   };
 
   // Save
@@ -317,13 +397,7 @@ export default function LessonConstructor() {
     setSaved(false);
     setValidationErrors([]);
     try {
-      const editorGraph: LessonGraph = {
-        startNodeId: startNodeId || (nodes[0]?.id ?? ''),
-        nodes,
-        edges,
-      };
-      // Convert to backend format (kind/nextNodeId/options/transitions)
-      const backendGraph = graphToBackendFormat(editorGraph);
+      const backendGraph = graphToBackendFormat(graph);
 
       const updatedModules: ContentModule[] = (draft.content_json?.modules ?? []).map(mod => {
         if (mod.id !== moduleId) return mod;
@@ -357,7 +431,7 @@ export default function LessonConstructor() {
     } finally {
       setSaving(false);
     }
-  }, [courseId, draft, draftVersion, edges, lessonId, lessonTitle, moduleId, nodes, startNodeId]);
+  }, [courseId, draft, draftVersion, graph, lessonId, lessonTitle, moduleId]);
 
   // Preview
   const handlePreview = useCallback(async () => {
@@ -488,6 +562,18 @@ export default function LessonConstructor() {
                         ? 'Иллюстрация загружена'
                         : 'Нажмите для загрузки иллюстрации'}
                     </div>
+                    <Select
+                      label="Следующий блок"
+                      value={getGraphEdgeTargetWithFallback(edges, node.id)}
+                      onChange={event => setStoryNextNode(node.id, event.target.value)}
+                    >
+                      <option value="">Выберите следующий блок</option>
+                      {getForwardTargetNodes(nodes, node.id).map(target => (
+                        <option key={target.id} value={target.id}>
+                          {nodeDisplayLabel(nodes, target.id)}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                 )}
 
@@ -508,29 +594,45 @@ export default function LessonConstructor() {
                         <span className={s.feedbackLabel}>Варианты ответа (нажмите кружок для правильного):</span>
                         <div className={s.optionsList}>
                           {cd.options.map(opt => (
-                            <div key={opt.option_id} className={s.optionRow}>
-                              <button
-                                className={`${s.correctToggle} ${cd.correct_option_id === opt.option_id ? s.active : ''}`}
-                                onClick={() => setCorrectOption(node.id, opt.option_id)}
-                                title={cd.correct_option_id === opt.option_id ? 'Правильный' : 'Отметить как правильный'}
-                              >
-                                {cd.correct_option_id === opt.option_id ? '✓' : ''}
-                              </button>
-                              <input
-                                className={s.optionInput}
-                                value={opt.text}
-                                onChange={e => updateOptionText(node.id, opt.option_id, e.target.value)}
-                                placeholder="Вариант ответа..."
-                              />
-                              {cd.options.length > 2 && (
+                            <div key={opt.option_id} className={s.optionBlock}>
+                              <div className={s.optionRow}>
                                 <button
-                                  className={s.removeOptionBtn}
-                                  onClick={() => removeOption(node.id, opt.option_id)}
-                                  title="Удалить вариант"
+                                  className={`${s.correctToggle} ${cd.correct_option_id === opt.option_id ? s.active : ''}`}
+                                  onClick={() => setCorrectOption(node.id, opt.option_id)}
+                                  title={cd.correct_option_id === opt.option_id ? 'Правильный' : 'Отметить как правильный'}
                                 >
-                                  &times;
+                                  {cd.correct_option_id === opt.option_id ? '✓' : ''}
                                 </button>
-                              )}
+                                <input
+                                  className={s.optionInput}
+                                  value={opt.text}
+                                  onChange={e => updateOptionText(node.id, opt.option_id, e.target.value)}
+                                  placeholder="Вариант ответа..."
+                                />
+                                {cd.options.length > 2 && (
+                                  <button
+                                    className={s.removeOptionBtn}
+                                    onClick={() => removeOption(node.id, opt.option_id)}
+                                    type="button"
+                                    aria-label="Удалить вариант"
+                                    title="Удалить вариант"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                              <Select
+                                label="Переход после этого ответа"
+                                value={getGraphEdgeTargetWithFallback(edges, node.id, optionEdgeCondition(opt.option_id))}
+                                onChange={event => setOptionNextNode(node.id, opt.option_id, event.target.value)}
+                              >
+                                <option value="">Выберите следующий блок</option>
+                                {getForwardTargetNodes(nodes, node.id).map(target => (
+                                  <option key={target.id} value={target.id}>
+                                    {nodeDisplayLabel(nodes, target.id)}
+                                  </option>
+                                ))}
+                              </Select>
                             </div>
                           ))}
                         </div>
@@ -595,6 +697,42 @@ export default function LessonConstructor() {
                         placeholder="Текст обратной связи..."
                         rows={2}
                       />
+                      <Select
+                        label="Следующий блок при правильном ответе"
+                        value={getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('correct'))}
+                        onChange={event => setFreeTextNextNode(node.id, 'correct', event.target.value)}
+                      >
+                        <option value="">Выберите следующий блок</option>
+                        {getForwardTargetNodes(nodes, node.id).map(target => (
+                          <option key={target.id} value={target.id}>
+                            {nodeDisplayLabel(nodes, target.id)}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        label="Следующий блок при частично верном ответе"
+                        value={getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('partial'))}
+                        onChange={event => setFreeTextNextNode(node.id, 'partial', event.target.value)}
+                      >
+                        <option value="">Выберите следующий блок</option>
+                        {getForwardTargetNodes(nodes, node.id).map(target => (
+                          <option key={target.id} value={target.id}>
+                            {nodeDisplayLabel(nodes, target.id)}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        label="Следующий блок при неправильном ответе"
+                        value={getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('incorrect'))}
+                        onChange={event => setFreeTextNextNode(node.id, 'incorrect', event.target.value)}
+                      >
+                        <option value="">Выберите следующий блок</option>
+                        {getForwardTargetNodes(nodes, node.id).map(target => (
+                          <option key={target.id} value={target.id}>
+                            {nodeDisplayLabel(nodes, target.id)}
+                          </option>
+                        ))}
+                      </Select>
                     </div>
                   );
                 })()}
@@ -602,25 +740,22 @@ export default function LessonConstructor() {
                 {/* Terminal node */}
                 {node.type === 'terminal' && (
                   <div className={s.terminalContent}>
-                    Конец этапа - ученик завершает прохождение
+                    <Textarea
+                      label="Текст завершения"
+                      value={(node.data.text as string) ?? ''}
+                      onChange={e => updateNodeData(node.id, 'text', e.target.value)}
+                      placeholder="Что увидит ученик в конце этапа..."
+                      rows={2}
+                    />
                   </div>
                 )}
 
                 {/* Edge info */}
-                {edges.filter(e => e.from === node.id).length > 0 && (
+                {describeOutgoingEdges(node).length > 0 && (
                   <div className={s.edgeInfo}>
-                    Далее &rarr;{' '}
-                    {edges
-                      .filter(e => e.from === node.id)
-                      .map(e => {
-                        const target = nodes.find(n => n.id === e.to);
-                        const targetIdx = nodes.indexOf(target!);
-                        return `#${targetIdx + 1} ${target ? (nodeTypeLabels[target.type]?.label ?? target.type) : e.to}`;
-                      })
-                      .join(', ')}
-                    {edges.find(e => e.from === node.id)?.condition && (
-                      <span> (условие: {edges.find(e => e.from === node.id)!.condition})</span>
-                    )}
+                    {describeOutgoingEdges(node).map(line => (
+                      <div key={line}>{line}</div>
+                    ))}
                   </div>
                 )}
               </ComicPanel>

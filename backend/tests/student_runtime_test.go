@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"pravoprost/backend/internal/testkit/app"
@@ -258,6 +259,787 @@ func TestStudentCatalogTree_PrerequisitePinnedRevisionAndTeacherLock(t *testing.
 	privateStartResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+teacherCreated.CourseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
 	if privateStartResp.StatusCode != http.StatusForbidden {
 		t.Fatalf("teacher course start lock status: %d", privateStartResp.StatusCode)
+	}
+}
+
+func TestStudentRuntime_StoryToEndCompletionUnlocksNextLesson(t *testing.T) {
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+
+	courseID, _ := publishPlatformCourse(t, adminClient, testApp, adminCSRF, "Story To End Runtime", map[string]any{
+		"modules": []any{
+			map[string]any{
+				"id":    "module_1",
+				"title": "Module 1",
+				"lessons": []any{
+					map[string]any{
+						"id":    "lesson_1",
+						"title": "Lesson 1",
+						"graph": map[string]any{
+							"startNodeId": "intro",
+							"nodes": []any{
+								map[string]any{"id": "intro", "kind": "story", "body": map[string]any{"text": "Intro"}, "nextNodeId": "question"},
+								map[string]any{
+									"id":     "question",
+									"kind":   "single_choice",
+									"prompt": "Question",
+									"options": []any{
+										map[string]any{"id": "a1", "text": "Correct", "result": "correct", "feedback": "Correct", "nextNodeId": "after"},
+										map[string]any{"id": "a2", "text": "Wrong", "result": "incorrect", "feedback": "Wrong", "nextNodeId": "after"},
+									},
+								},
+								map[string]any{"id": "after", "kind": "story", "body": map[string]any{"text": "After"}, "nextNodeId": "end"},
+								map[string]any{"id": "end", "kind": "end", "text": "Done"},
+							},
+						},
+					},
+					map[string]any{
+						"id":    "lesson_2",
+						"title": "Lesson 2",
+						"graph": map[string]any{
+							"startNodeId": "s1",
+							"nodes": []any{
+								map[string]any{"id": "s1", "kind": "story", "body": map[string]any{"text": "Second"}, "nextNodeId": "s2"},
+								map[string]any{"id": "s2", "kind": "end", "text": "Done"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	studentClient := httpclient.New(t)
+	studentCSRF, studentID := loginAsRole(t, studentClient, testApp, "story-to-end-student", "student")
+
+	initialTree := fetchStudentTree(t, studentClient, testApp, courseID)
+	if initialTree.Modules[0].Lessons[0].Access.AccessState != "free" {
+		t.Fatalf("first lesson should be free, got %s", initialTree.Modules[0].Lessons[0].Access.AccessState)
+	}
+	if initialTree.Modules[0].Lessons[1].Access.AccessState != "locked_prerequisite" {
+		t.Fatalf("second lesson should start locked, got %s", initialTree.Modules[0].Lessons[1].Access.AccessState)
+	}
+
+	startResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+courseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("start lesson_1 status: %d", startResp.StatusCode)
+	}
+	defer startResp.Body.Close()
+	var start struct {
+		SessionID    string `json:"session_id"`
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&start); err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+
+	questionResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    start.StateVersion,
+		"expected_node_id": start.NodeID,
+	}, studentCSRF)
+	if questionResp.StatusCode != http.StatusOK {
+		t.Fatalf("question next status: %d", questionResp.StatusCode)
+	}
+	defer questionResp.Body.Close()
+	var question struct {
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(questionResp.Body).Decode(&question); err != nil {
+		t.Fatalf("decode question: %v", err)
+	}
+
+	answerResp := performJSONWithIdempotency(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/answer", map[string]any{
+		"state_version": question.StateVersion,
+		"node_id":       question.NodeID,
+		"answer":        map[string]any{"option_id": "a1"},
+	}, studentCSRF, "story-to-end-answer")
+	if answerResp.StatusCode != http.StatusOK {
+		t.Fatalf("answer status: %d", answerResp.StatusCode)
+	}
+	defer answerResp.Body.Close()
+	var answer struct {
+		NextStep *struct {
+			StateVersion int64  `json:"state_version"`
+			NodeID       string `json:"node_id"`
+			NodeKind     string `json:"node_kind"`
+		} `json:"next_step"`
+	}
+	if err := json.NewDecoder(answerResp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode answer: %v", err)
+	}
+	if answer.NextStep == nil || answer.NextStep.NodeKind != "story" {
+		t.Fatalf("expected story next step, got %+v", answer.NextStep)
+	}
+
+	endResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    answer.NextStep.StateVersion,
+		"expected_node_id": answer.NextStep.NodeID,
+	}, studentCSRF)
+	if endResp.StatusCode != http.StatusOK {
+		t.Fatalf("story-to-end next status: %d", endResp.StatusCode)
+	}
+	defer endResp.Body.Close()
+
+	var lessonStatus string
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `
+		select status
+		from lesson_progress
+		where student_id = $1 and lesson_id = 'lesson_1'
+	`, studentID).Scan(&lessonStatus); err != nil {
+		t.Fatalf("query lesson progress: %v", err)
+	}
+	if lessonStatus != "completed" {
+		t.Fatalf("expected lesson_1 completed after story->end flow, got %s", lessonStatus)
+	}
+
+	treeAfterCompletion := fetchStudentTree(t, studentClient, testApp, courseID)
+	if treeAfterCompletion.Modules[0].Lessons[0].Status != "completed" {
+		t.Fatalf("expected first lesson status completed in tree, got %s", treeAfterCompletion.Modules[0].Lessons[0].Status)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState != "completed" {
+		t.Fatalf(
+			"expected first lesson access_state completed in tree, got %s (second lesson access=%s)",
+			treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState,
+			treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState,
+		)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState != "free" {
+		t.Fatalf("expected second lesson unlocked after story->end completion, got %s", treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState)
+	}
+}
+
+func TestTeacherAccessRuntime_StoryToEndCompletionUnlocksNextLesson(t *testing.T) {
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+
+	teacherClient := httpclient.New(t)
+	teacherCSRF, _ := loginAsRole(t, teacherClient, testApp, "teacher-runtime-story-end", "teacher")
+	profileResp := performJSON(t, teacherClient, http.MethodPut, testApp.Server.URL+"/api/v1/teacher/profile", map[string]any{
+		"display_name":      "Teacher",
+		"organization_name": "Org",
+		"avatar_asset_id":   nil,
+	}, teacherCSRF)
+	if profileResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher profile status: %d", profileResp.StatusCode)
+	}
+
+	createResp := performJSON(t, teacherClient, http.MethodPost, testApp.Server.URL+"/api/v1/teacher/courses", map[string]any{
+		"title":       "Teacher Story To End",
+		"description": "Published",
+	}, teacherCSRF)
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("teacher create course status: %d", createResp.StatusCode)
+	}
+	defer createResp.Body.Close()
+	var created struct {
+		CourseID string `json:"course_id"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode teacher course: %v", err)
+	}
+
+	updateResp := performJSON(t, teacherClient, http.MethodPut, testApp.Server.URL+"/api/v1/teacher/courses/"+created.CourseID+"/draft", map[string]any{
+		"draft_version":  1,
+		"title":          "Teacher Story To End",
+		"description":    "Published",
+		"cover_asset_id": nil,
+		"content": map[string]any{
+			"modules": []any{
+				map[string]any{
+					"id":    "module_1",
+					"title": "Module 1",
+					"lessons": []any{
+						map[string]any{
+							"id":    "lesson_1",
+							"title": "Lesson 1",
+							"graph": map[string]any{
+								"startNodeId": "intro",
+								"nodes": []any{
+									map[string]any{"id": "intro", "kind": "story", "body": map[string]any{"text": "Intro"}, "nextNodeId": "question"},
+									map[string]any{
+										"id":     "question",
+										"kind":   "single_choice",
+										"prompt": "Question",
+										"options": []any{
+											map[string]any{"id": "a1", "text": "Correct", "result": "correct", "feedback": "Correct", "nextNodeId": "after"},
+										},
+									},
+									map[string]any{"id": "after", "kind": "story", "body": map[string]any{"text": "After"}, "nextNodeId": "end"},
+									map[string]any{"id": "end", "kind": "end", "text": "Done"},
+								},
+							},
+						},
+						map[string]any{
+							"id":    "lesson_2",
+							"title": "Lesson 2",
+							"graph": map[string]any{
+								"startNodeId": "s1",
+								"nodes": []any{
+									map[string]any{"id": "s1", "kind": "story", "body": map[string]any{"text": "Second"}, "nextNodeId": "s2"},
+									map[string]any{"id": "s2", "kind": "end", "text": "Done"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, teacherCSRF)
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher update draft status: %d", updateResp.StatusCode)
+	}
+
+	adminApproveTeacherCourse(t, adminClient, testApp, adminCSRF, teacherClient, teacherCSRF, created.CourseID)
+
+	linkResp := performJSON(t, teacherClient, http.MethodPost, testApp.Server.URL+"/api/v1/teacher/courses/"+created.CourseID+"/access-links", map[string]any{}, teacherCSRF)
+	if linkResp.StatusCode != http.StatusCreated {
+		t.Fatalf("teacher create access link status: %d", linkResp.StatusCode)
+	}
+	defer linkResp.Body.Close()
+	var link struct {
+		ClaimURL string `json:"claim_url"`
+	}
+	if err := json.NewDecoder(linkResp.Body).Decode(&link); err != nil {
+		t.Fatalf("decode teacher access link: %v", err)
+	}
+	token := strings.TrimPrefix(strings.Split(link.ClaimURL, "#")[1], "token=")
+
+	studentClient := httpclient.New(t)
+	studentCSRF, studentID := loginAsRole(t, studentClient, testApp, "teacher-access-story-end-student", "student")
+	claimResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/course-links/claim", map[string]any{
+		"token": token,
+	}, studentCSRF)
+	if claimResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher claim link status: %d", claimResp.StatusCode)
+	}
+
+	startResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+created.CourseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher start lesson_1 status: %d", startResp.StatusCode)
+	}
+	defer startResp.Body.Close()
+	var start struct {
+		SessionID    string `json:"session_id"`
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&start); err != nil {
+		t.Fatalf("decode teacher start: %v", err)
+	}
+
+	questionResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    start.StateVersion,
+		"expected_node_id": start.NodeID,
+	}, studentCSRF)
+	if questionResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher question next status: %d", questionResp.StatusCode)
+	}
+	defer questionResp.Body.Close()
+	var question struct {
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(questionResp.Body).Decode(&question); err != nil {
+		t.Fatalf("decode teacher question: %v", err)
+	}
+
+	answerResp := performJSONWithIdempotency(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/answer", map[string]any{
+		"state_version": question.StateVersion,
+		"node_id":       question.NodeID,
+		"answer":        map[string]any{"option_id": "a1"},
+	}, studentCSRF, "teacher-story-end-answer")
+	if answerResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher answer status: %d", answerResp.StatusCode)
+	}
+	defer answerResp.Body.Close()
+	var answer struct {
+		NextStep *struct {
+			StateVersion int64  `json:"state_version"`
+			NodeID       string `json:"node_id"`
+			NodeKind     string `json:"node_kind"`
+		} `json:"next_step"`
+	}
+	if err := json.NewDecoder(answerResp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode teacher answer: %v", err)
+	}
+	if answer.NextStep == nil || answer.NextStep.NodeKind != "story" {
+		t.Fatalf("expected teacher story next step, got %+v", answer.NextStep)
+	}
+
+	endResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    answer.NextStep.StateVersion,
+		"expected_node_id": answer.NextStep.NodeID,
+	}, studentCSRF)
+	if endResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher story-to-end next status: %d", endResp.StatusCode)
+	}
+	defer endResp.Body.Close()
+
+	treeAfterCompletion := fetchStudentTree(t, studentClient, testApp, created.CourseID)
+	if treeAfterCompletion.Modules[0].Lessons[0].Status != "completed" {
+		t.Fatalf("expected teacher lesson_1 completed status in tree, got %s", treeAfterCompletion.Modules[0].Lessons[0].Status)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState != "completed" {
+		t.Fatalf("expected teacher lesson_1 completed access_state in tree, got %s", treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState != "free" {
+		t.Fatalf("expected teacher lesson_2 unlocked after story->end completion, got %s for student %s", treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState, studentID)
+	}
+}
+
+func TestStudentRuntime_BranchingSingleChoiceSuccessBranchCompletesLesson(t *testing.T) {
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+
+	courseID, _ := publishPlatformCourse(t, adminClient, testApp, adminCSRF, "Branching Story To End", map[string]any{
+		"modules": []any{
+			map[string]any{
+				"id":    "module_1",
+				"title": "Module 1",
+				"lessons": []any{
+					map[string]any{
+						"id":    "lesson_1",
+						"title": "Lesson 1",
+						"graph": map[string]any{
+							"startNodeId": "intro",
+							"nodes": []any{
+								map[string]any{"id": "intro", "kind": "story", "body": map[string]any{"text": "Intro"}, "nextNodeId": "question"},
+								map[string]any{
+									"id":     "question",
+									"kind":   "single_choice",
+									"prompt": "Question",
+									"options": []any{
+										map[string]any{"id": "correct", "text": "Correct", "result": "correct", "feedback": "Correct", "nextNodeId": "success"},
+										map[string]any{"id": "wrong", "text": "Wrong", "result": "incorrect", "feedback": "Wrong", "nextNodeId": "retry"},
+									},
+								},
+								map[string]any{"id": "success", "kind": "story", "body": map[string]any{"text": "Success"}, "nextNodeId": "end"},
+								map[string]any{"id": "retry", "kind": "story", "body": map[string]any{"text": "Retry"}, "nextNodeId": "end"},
+								map[string]any{"id": "end", "kind": "end", "text": "Done"},
+							},
+						},
+					},
+					map[string]any{
+						"id":    "lesson_2",
+						"title": "Lesson 2",
+						"graph": map[string]any{
+							"startNodeId": "s1",
+							"nodes": []any{
+								map[string]any{"id": "s1", "kind": "story", "body": map[string]any{"text": "Second"}, "nextNodeId": "s2"},
+								map[string]any{"id": "s2", "kind": "end", "text": "Done"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	studentClient := httpclient.New(t)
+	studentCSRF, _ := loginAsRole(t, studentClient, testApp, "student-branching-success", "student")
+
+	startResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+courseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("start lesson_1 status: %d", startResp.StatusCode)
+	}
+	defer startResp.Body.Close()
+	var start struct {
+		SessionID    string `json:"session_id"`
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&start); err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+
+	questionResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    start.StateVersion,
+		"expected_node_id": start.NodeID,
+	}, studentCSRF)
+	if questionResp.StatusCode != http.StatusOK {
+		t.Fatalf("question next status: %d", questionResp.StatusCode)
+	}
+	defer questionResp.Body.Close()
+	var question struct {
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(questionResp.Body).Decode(&question); err != nil {
+		t.Fatalf("decode question: %v", err)
+	}
+
+	answerResp := performJSONWithIdempotency(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/answer", map[string]any{
+		"state_version": question.StateVersion,
+		"node_id":       question.NodeID,
+		"answer":        map[string]any{"option_id": "correct"},
+	}, studentCSRF, "branching-success-answer")
+	if answerResp.StatusCode != http.StatusOK {
+		t.Fatalf("answer status: %d", answerResp.StatusCode)
+	}
+	defer answerResp.Body.Close()
+	var answer struct {
+		NextStep *struct {
+			StateVersion int64  `json:"state_version"`
+			NodeID       string `json:"node_id"`
+			NodeKind     string `json:"node_kind"`
+		} `json:"next_step"`
+	}
+	if err := json.NewDecoder(answerResp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode answer: %v", err)
+	}
+	if answer.NextStep == nil || answer.NextStep.NodeKind != "story" {
+		t.Fatalf("expected story next step, got %+v", answer.NextStep)
+	}
+
+	endResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    answer.NextStep.StateVersion,
+		"expected_node_id": answer.NextStep.NodeID,
+	}, studentCSRF)
+	if endResp.StatusCode != http.StatusOK {
+		t.Fatalf("story-to-end next status: %d", endResp.StatusCode)
+	}
+	defer endResp.Body.Close()
+
+	treeAfterCompletion := fetchStudentTree(t, studentClient, testApp, courseID)
+	if treeAfterCompletion.Modules[0].Lessons[0].Status != "completed" {
+		t.Fatalf("expected lesson_1 completed after branching success path, got %s", treeAfterCompletion.Modules[0].Lessons[0].Status)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState != "completed" {
+		t.Fatalf("expected lesson_1 completed access_state after branching success path, got %s", treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState)
+	}
+	if treeAfterCompletion.Progress == nil || treeAfterCompletion.Progress["completed_lessons"] != 1.0 {
+		t.Fatalf("expected completed_lessons=1 after branching success path, got %+v", treeAfterCompletion.Progress)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState != "free" {
+		t.Fatalf("expected lesson_2 unlocked after branching success path, got %s", treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState)
+	}
+}
+
+func TestTeacherAccessRuntime_BranchingSingleChoiceSuccessBranchCompletesLesson(t *testing.T) {
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+
+	teacherClient := httpclient.New(t)
+	teacherCSRF, _ := loginAsRole(t, teacherClient, testApp, "teacher-branching-runtime", "teacher")
+	profileResp := performJSON(t, teacherClient, http.MethodPut, testApp.Server.URL+"/api/v1/teacher/profile", map[string]any{
+		"display_name":      "Teacher",
+		"organization_name": "Org",
+		"avatar_asset_id":   nil,
+	}, teacherCSRF)
+	if profileResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher profile status: %d", profileResp.StatusCode)
+	}
+
+	createResp := performJSON(t, teacherClient, http.MethodPost, testApp.Server.URL+"/api/v1/teacher/courses", map[string]any{
+		"title":       "Teacher Branching Story To End",
+		"description": "Published",
+	}, teacherCSRF)
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("teacher create course status: %d", createResp.StatusCode)
+	}
+	defer createResp.Body.Close()
+	var created struct {
+		CourseID string `json:"course_id"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode teacher course: %v", err)
+	}
+
+	updateResp := performJSON(t, teacherClient, http.MethodPut, testApp.Server.URL+"/api/v1/teacher/courses/"+created.CourseID+"/draft", map[string]any{
+		"draft_version":  1,
+		"title":          "Teacher Branching Story To End",
+		"description":    "Published",
+		"cover_asset_id": nil,
+		"content": map[string]any{
+			"modules": []any{
+				map[string]any{
+					"id":    "module_1",
+					"title": "Module 1",
+					"lessons": []any{
+						map[string]any{
+							"id":    "lesson_1",
+							"title": "Lesson 1",
+							"graph": map[string]any{
+								"startNodeId": "intro",
+								"nodes": []any{
+									map[string]any{"id": "intro", "kind": "story", "body": map[string]any{"text": "Intro"}, "nextNodeId": "question"},
+									map[string]any{
+										"id":     "question",
+										"kind":   "single_choice",
+										"prompt": "Question",
+										"options": []any{
+											map[string]any{"id": "correct", "text": "Correct", "result": "correct", "feedback": "Correct", "nextNodeId": "success"},
+											map[string]any{"id": "wrong", "text": "Wrong", "result": "incorrect", "feedback": "Wrong", "nextNodeId": "retry"},
+										},
+									},
+									map[string]any{"id": "success", "kind": "story", "body": map[string]any{"text": "Success"}, "nextNodeId": "end"},
+									map[string]any{"id": "retry", "kind": "story", "body": map[string]any{"text": "Retry"}, "nextNodeId": "end"},
+									map[string]any{"id": "end", "kind": "end", "text": "Done"},
+								},
+							},
+						},
+						map[string]any{
+							"id":    "lesson_2",
+							"title": "Lesson 2",
+							"graph": map[string]any{
+								"startNodeId": "s1",
+								"nodes": []any{
+									map[string]any{"id": "s1", "kind": "story", "body": map[string]any{"text": "Second"}, "nextNodeId": "s2"},
+									map[string]any{"id": "s2", "kind": "end", "text": "Done"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, teacherCSRF)
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher update draft status: %d", updateResp.StatusCode)
+	}
+
+	adminApproveTeacherCourse(t, adminClient, testApp, adminCSRF, teacherClient, teacherCSRF, created.CourseID)
+
+	linkResp := performJSON(t, teacherClient, http.MethodPost, testApp.Server.URL+"/api/v1/teacher/courses/"+created.CourseID+"/access-links", map[string]any{}, teacherCSRF)
+	if linkResp.StatusCode != http.StatusCreated {
+		t.Fatalf("teacher create access link status: %d", linkResp.StatusCode)
+	}
+	defer linkResp.Body.Close()
+	var link struct {
+		ClaimURL string `json:"claim_url"`
+	}
+	if err := json.NewDecoder(linkResp.Body).Decode(&link); err != nil {
+		t.Fatalf("decode teacher access link: %v", err)
+	}
+	token := strings.TrimPrefix(strings.Split(link.ClaimURL, "#")[1], "token=")
+
+	studentClient := httpclient.New(t)
+	studentCSRF, _ := loginAsRole(t, studentClient, testApp, "teacher-access-branching-student", "student")
+	claimResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/course-links/claim", map[string]any{
+		"token": token,
+	}, studentCSRF)
+	if claimResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher claim link status: %d", claimResp.StatusCode)
+	}
+
+	startResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+created.CourseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher start lesson_1 status: %d", startResp.StatusCode)
+	}
+	defer startResp.Body.Close()
+	var start struct {
+		SessionID    string `json:"session_id"`
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&start); err != nil {
+		t.Fatalf("decode teacher start: %v", err)
+	}
+
+	questionResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    start.StateVersion,
+		"expected_node_id": start.NodeID,
+	}, studentCSRF)
+	if questionResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher question next status: %d", questionResp.StatusCode)
+	}
+	defer questionResp.Body.Close()
+	var question struct {
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(questionResp.Body).Decode(&question); err != nil {
+		t.Fatalf("decode teacher question: %v", err)
+	}
+
+	answerResp := performJSONWithIdempotency(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/answer", map[string]any{
+		"state_version": question.StateVersion,
+		"node_id":       question.NodeID,
+		"answer":        map[string]any{"option_id": "correct"},
+	}, studentCSRF, "teacher-branching-success-answer")
+	if answerResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher answer status: %d", answerResp.StatusCode)
+	}
+	defer answerResp.Body.Close()
+	var answer struct {
+		NextStep *struct {
+			StateVersion int64  `json:"state_version"`
+			NodeID       string `json:"node_id"`
+			NodeKind     string `json:"node_kind"`
+		} `json:"next_step"`
+	}
+	if err := json.NewDecoder(answerResp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode teacher answer: %v", err)
+	}
+	if answer.NextStep == nil || answer.NextStep.NodeKind != "story" {
+		t.Fatalf("expected teacher story next step, got %+v", answer.NextStep)
+	}
+
+	endResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    answer.NextStep.StateVersion,
+		"expected_node_id": answer.NextStep.NodeID,
+	}, studentCSRF)
+	if endResp.StatusCode != http.StatusOK {
+		t.Fatalf("teacher story-to-end next status: %d", endResp.StatusCode)
+	}
+	defer endResp.Body.Close()
+
+	treeAfterCompletion := fetchStudentTree(t, studentClient, testApp, created.CourseID)
+	if treeAfterCompletion.Modules[0].Lessons[0].Status != "completed" {
+		t.Fatalf("expected teacher lesson_1 completed after branching success path, got %s", treeAfterCompletion.Modules[0].Lessons[0].Status)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState != "completed" {
+		t.Fatalf("expected teacher lesson_1 completed access_state after branching success path, got %s", treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState)
+	}
+	if treeAfterCompletion.Progress == nil || treeAfterCompletion.Progress["completed_lessons"] != 1.0 {
+		t.Fatalf("expected teacher completed_lessons=1 after branching success path, got %+v", treeAfterCompletion.Progress)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState != "free" {
+		t.Fatalf("expected teacher lesson_2 unlocked after branching success path, got %s", treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState)
+	}
+}
+
+func TestStudentRuntime_IdempotentStoryToEndNextCompletesInconsistentSession(t *testing.T) {
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+
+	courseID, _ := publishPlatformCourse(t, adminClient, testApp, adminCSRF, "Idempotent Story To End", map[string]any{
+		"modules": []any{
+			map[string]any{
+				"id":    "module_1",
+				"title": "Module 1",
+				"lessons": []any{
+					map[string]any{
+						"id":    "lesson_1",
+						"title": "Lesson 1",
+						"graph": map[string]any{
+							"startNodeId": "intro",
+							"nodes": []any{
+								map[string]any{"id": "intro", "kind": "story", "body": map[string]any{"text": "Intro"}, "nextNodeId": "question"},
+								map[string]any{
+									"id":     "question",
+									"kind":   "single_choice",
+									"prompt": "Question",
+									"options": []any{
+										map[string]any{"id": "correct", "text": "Correct", "result": "correct", "feedback": "Correct", "nextNodeId": "success"},
+										map[string]any{"id": "wrong", "text": "Wrong", "result": "incorrect", "feedback": "Wrong", "nextNodeId": "retry"},
+									},
+								},
+								map[string]any{"id": "success", "kind": "story", "body": map[string]any{"text": "Success"}, "nextNodeId": "end"},
+								map[string]any{"id": "retry", "kind": "story", "body": map[string]any{"text": "Retry"}, "nextNodeId": "end"},
+								map[string]any{"id": "end", "kind": "end", "text": "Done"},
+							},
+						},
+					},
+					map[string]any{
+						"id":    "lesson_2",
+						"title": "Lesson 2",
+						"graph": map[string]any{
+							"startNodeId": "s1",
+							"nodes": []any{
+								map[string]any{"id": "s1", "kind": "story", "body": map[string]any{"text": "Second"}, "nextNodeId": "s2"},
+								map[string]any{"id": "s2", "kind": "end", "text": "Done"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	studentClient := httpclient.New(t)
+	studentCSRF, _ := loginAsRole(t, studentClient, testApp, "student-idempotent-story-end", "student")
+
+	startResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+courseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("start lesson_1 status: %d", startResp.StatusCode)
+	}
+	defer startResp.Body.Close()
+	var start struct {
+		SessionID    string `json:"session_id"`
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&start); err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+
+	questionResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    start.StateVersion,
+		"expected_node_id": start.NodeID,
+	}, studentCSRF)
+	if questionResp.StatusCode != http.StatusOK {
+		t.Fatalf("question next status: %d", questionResp.StatusCode)
+	}
+	defer questionResp.Body.Close()
+	var question struct {
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
+	}
+	if err := json.NewDecoder(questionResp.Body).Decode(&question); err != nil {
+		t.Fatalf("decode question: %v", err)
+	}
+
+	answerResp := performJSONWithIdempotency(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/answer", map[string]any{
+		"state_version": question.StateVersion,
+		"node_id":       question.NodeID,
+		"answer":        map[string]any{"option_id": "correct"},
+	}, studentCSRF, "idempotent-story-end-answer")
+	if answerResp.StatusCode != http.StatusOK {
+		t.Fatalf("answer status: %d", answerResp.StatusCode)
+	}
+	defer answerResp.Body.Close()
+	var answer struct {
+		NextStep *struct {
+			StateVersion int64  `json:"state_version"`
+			NodeID       string `json:"node_id"`
+			NodeKind     string `json:"node_kind"`
+		} `json:"next_step"`
+	}
+	if err := json.NewDecoder(answerResp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode answer: %v", err)
+	}
+	if answer.NextStep == nil || answer.NextStep.NodeKind != "story" {
+		t.Fatalf("expected story next step, got %+v", answer.NextStep)
+	}
+
+	if _, err := testApp.DB.Pool().Exec(context.Background(), `
+		update lesson_sessions
+		set current_node_id = 'end',
+		    state_version = $2
+		where id = $1
+	`, start.SessionID, answer.NextStep.StateVersion+1); err != nil {
+		t.Fatalf("force inconsistent end session: %v", err)
+	}
+
+	endResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+start.SessionID+"/next", map[string]any{
+		"state_version":    answer.NextStep.StateVersion,
+		"expected_node_id": answer.NextStep.NodeID,
+	}, studentCSRF)
+	if endResp.StatusCode != http.StatusOK {
+		t.Fatalf("idempotent story-to-end next status: %d", endResp.StatusCode)
+	}
+	defer endResp.Body.Close()
+
+	treeAfterCompletion := fetchStudentTree(t, studentClient, testApp, courseID)
+	if treeAfterCompletion.Modules[0].Lessons[0].Status != "completed" {
+		t.Fatalf("expected lesson_1 completed after idempotent story->end next, got %s", treeAfterCompletion.Modules[0].Lessons[0].Status)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState != "completed" {
+		t.Fatalf("expected lesson_1 completed access_state after idempotent story->end next, got %s", treeAfterCompletion.Modules[0].Lessons[0].Access.AccessState)
+	}
+	if treeAfterCompletion.Progress == nil || treeAfterCompletion.Progress["completed_lessons"] != 1.0 {
+		t.Fatalf("expected completed_lessons=1 after idempotent story->end next, got %+v", treeAfterCompletion.Progress)
+	}
+	if treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState != "free" {
+		t.Fatalf("expected lesson_2 unlocked after idempotent story->end next, got %s", treeAfterCompletion.Modules[0].Lessons[1].Access.AccessState)
 	}
 }
 
@@ -734,9 +1516,11 @@ func TestStudentRuntime_RetryRequiresCompletedEligibleLesson(t *testing.T) {
 
 type studentTreeView struct {
 	CourseRevisionID string `json:"course_revision_id"`
+	Progress         map[string]any `json:"progress"`
 	Modules          []struct {
 		Lessons []struct {
 			LessonID string `json:"lesson_id"`
+			Status   string `json:"status"`
 			Access   struct {
 				AccessState string `json:"access_state"`
 			} `json:"access"`

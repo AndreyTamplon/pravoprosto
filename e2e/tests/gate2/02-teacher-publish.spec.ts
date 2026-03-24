@@ -7,13 +7,15 @@ test.describe('Gate 2 -- Teacher publish and multi-role flow', () => {
       storageState: '.auth/teacher.json',
     });
     const teacherPage = await teacherContext.newPage();
+    const courseTitle = `E2E Тестовый курс ${Date.now()}`;
+    const moduleTitle = `Модуль ${Date.now()}`;
 
     await teacherPage.goto('/teacher');
     await expect(teacherPage.getByRole('heading', { name: 'Мои курсы' })).toBeVisible();
 
     // Create a new course
     await teacherPage.getByRole('button', { name: /Создать курс/i }).click();
-    await teacherPage.getByPlaceholder('Например: Основы права').fill('E2E Тестовый курс');
+    await teacherPage.getByPlaceholder('Например: Основы права').fill(courseTitle);
     await teacherPage.getByPlaceholder('Кратко опишите курс...').fill('Курс для E2E теста');
     await teacherPage.getByRole('button', { name: 'Создать', exact: true }).click();
 
@@ -23,9 +25,14 @@ test.describe('Gate 2 -- Teacher publish and multi-role flow', () => {
 
     // Add module and lesson
     await teacherPage.getByRole('button', { name: /Модуль/i }).click();
-    await expect(teacherPage.locator('input[placeholder="Название модуля..."]').first()).toBeVisible();
+    const moduleTitleInput = teacherPage.locator('input[placeholder="Название модуля..."]').first();
+    await expect(moduleTitleInput).toBeVisible();
+    await moduleTitleInput.fill(moduleTitle);
+    await moduleTitleInput.press('Tab');
 
-    await teacherPage.getByRole('button', { name: /Добавить этап/i }).click();
+    const addLessonButton = teacherPage.getByRole('button', { name: /Добавить этап/i }).last();
+    await expect(addLessonButton).toBeVisible();
+    await addLessonButton.click();
     await expect(teacherPage.getByText(/Этап 1/)).toBeVisible();
 
     // Save
@@ -37,7 +44,7 @@ test.describe('Gate 2 -- Teacher publish and multi-role flow', () => {
 
     // Verify course appears on dashboard
     await teacherPage.goto('/teacher');
-    await expect(teacherPage.getByText('E2E Тестовый курс')).toBeVisible();
+    await expect(teacherPage.getByText(courseTitle, { exact: true })).toBeVisible();
 
     await teacherContext.close();
   });

@@ -68,7 +68,7 @@ async function fetchRequestId(
   offerId: string,
   studentName: string,
 ): Promise<string> {
-  return adminPage.evaluate(async ({ currentOfferId, currentStudentName }) => {
+  return adminPage.evaluate(async ({ currentOfferId, currentStudentName, expectedOfferTitle }) => {
     const response = await fetch('/api/v1/admin/commerce/purchase-requests', {
       credentials: 'include',
       headers: { Accept: 'application/json' },
@@ -80,11 +80,14 @@ async function fetchRequestId(
       const student = (item.student ?? {}) as Record<string, unknown>;
       const offer = (item.offer ?? {}) as Record<string, unknown>;
       return (student.display_name ?? item.student_name) === currentStudentName
-        && (offer.offer_id ?? item.offer_id) === currentOfferId
+        && (
+          (offer.offer_id ?? item.offer_id) === currentOfferId
+          || (offer.title ?? item.offer_title) === expectedOfferTitle
+        )
         && item.status === 'open';
     });
     return (match?.purchase_request_id as string | undefined) ?? '';
-  }, { currentOfferId: offerId, currentStudentName: studentName });
+  }, { currentOfferId: offerId, currentStudentName: studentName, expectedOfferTitle: OFFER_TITLE });
 }
 
 async function ensureOrderForStudent(
@@ -92,7 +95,7 @@ async function ensureOrderForStudent(
   offerId: string,
   studentName: string,
 ): Promise<string> {
-  const fetchExistingOrderId = async () => adminPage.evaluate(async ({ currentOfferId, currentStudentName }) => {
+  const fetchExistingOrderId = async () => adminPage.evaluate(async ({ currentOfferId, currentStudentName, expectedOfferTitle }) => {
     const response = await fetch('/api/v1/admin/commerce/orders', {
       credentials: 'include',
       headers: { Accept: 'application/json' },
@@ -104,10 +107,13 @@ async function ensureOrderForStudent(
       const student = (item.student ?? {}) as Record<string, unknown>;
       const offer = (item.offer ?? {}) as Record<string, unknown>;
       return (student.display_name ?? item.student_name) === currentStudentName
-        && (offer.offer_id ?? item.offer_id) === currentOfferId;
+        && (
+          (offer.offer_id ?? item.offer_id) === currentOfferId
+          || (offer.title ?? item.offer_title) === expectedOfferTitle
+        );
     });
     return (match?.order_id as string | undefined) ?? '';
-  }, { currentOfferId: offerId, currentStudentName: studentName });
+  }, { currentOfferId: offerId, currentStudentName: studentName, expectedOfferTitle: OFFER_TITLE });
 
   const existingOrderId = await fetchExistingOrderId();
   if (existingOrderId) {
@@ -279,7 +285,11 @@ test.describe('QA Bug 6: Offer update preserves currency', () => {
     expect((capturedUpdateBody.price_amount_minor as number)).toBeGreaterThan(0);
     expect((await updateResponse).ok()).toBeTruthy();
     await expect(page.getByText(/Ошибка/i)).not.toBeVisible();
-    await expect(page.getByText('490')).toBeVisible({ timeout: 5000 });
+    const updatedOfferRow = page.locator('tbody tr')
+      .filter({ hasText: 'Урок: Персональные данные (обновлён)' })
+      .first();
+    await expect(updatedOfferRow).toBeVisible({ timeout: 5000 });
+    await expect(updatedOfferRow).toContainText('490 ₽');
 
     await adminCtx.close();
   });

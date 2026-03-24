@@ -319,6 +319,165 @@ export interface GraphEdge {
   condition?: string;
 }
 
+export type GraphVerdict = 'correct' | 'partial' | 'incorrect';
+
+export interface ChoiceOption {
+  option_id: string;
+  text: string;
+}
+
+const OPTION_EDGE_PREFIX = 'option:';
+const VERDICT_EDGE_PREFIX = 'verdict:';
+
+export function optionEdgeCondition(optionId: string): string {
+  return `${OPTION_EDGE_PREFIX}${optionId}`;
+}
+
+export function verdictEdgeCondition(verdict: GraphVerdict): string {
+  return `${VERDICT_EDGE_PREFIX}${verdict}`;
+}
+
+function parseOptionEdgeCondition(condition?: string): string | null {
+  if (!condition?.startsWith(OPTION_EDGE_PREFIX)) {
+    return null;
+  }
+  const optionId = condition.slice(OPTION_EDGE_PREFIX.length).trim();
+  return optionId || null;
+}
+
+function parseVerdictEdgeCondition(condition?: string): GraphVerdict | null {
+  if (!condition?.startsWith(VERDICT_EDGE_PREFIX)) {
+    return null;
+  }
+  const verdict = condition.slice(VERDICT_EDGE_PREFIX.length).trim();
+  if (verdict === 'correct' || verdict === 'partial' || verdict === 'incorrect') {
+    return verdict;
+  }
+  return null;
+}
+
+function edgeKey(from: string, condition?: string): string {
+  return `${from}::${condition ?? ''}`;
+}
+
+function nextNodeIdByOrder(nodes: GraphNode[], nodeId: string): string {
+  const index = nodes.findIndex(node => node.id === nodeId);
+  if (index < 0) return '';
+  return nodes[index + 1]?.id ?? '';
+}
+
+export function getForwardTargetNodes(nodes: GraphNode[], nodeId: string): GraphNode[] {
+  const index = nodes.findIndex(node => node.id === nodeId);
+  if (index < 0) {
+    return nodes;
+  }
+  return nodes.slice(index + 1);
+}
+
+export function getGraphEdgeTarget(edges: GraphEdge[], from: string, condition?: string): string {
+  const target = edges.find(edge =>
+    edge.from === from && (edge.condition ?? undefined) === (condition ?? undefined),
+  )?.to;
+  return target ?? '';
+}
+
+export function getGraphEdgeTargetWithFallback(edges: GraphEdge[], from: string, condition?: string): string {
+  return getGraphEdgeTarget(edges, from, condition) || (condition ? getGraphEdgeTarget(edges, from) : '');
+}
+
+export function setGraphEdgeTarget(
+  edges: GraphEdge[],
+  from: string,
+  condition: string | undefined,
+  to: string,
+): GraphEdge[] {
+  const normalizedCondition = condition?.trim() || undefined;
+  const trimmedTarget = to.trim();
+  const nextEdges = edges.filter(edge =>
+    !(edge.from === from && (edge.condition ?? undefined) === normalizedCondition),
+  );
+  if (!trimmedTarget) {
+    return nextEdges;
+  }
+  return [
+    ...nextEdges,
+    normalizedCondition ? { from, to: trimmedTarget, condition: normalizedCondition } : { from, to: trimmedTarget },
+  ];
+}
+
+function isValidEdgeForNode(node: GraphNode, edge: GraphEdge): boolean {
+  if (node.type === 'story') {
+    return !edge.condition;
+  }
+  if (node.type === 'single_choice') {
+    if (!edge.condition) return true;
+    const optionId = parseOptionEdgeCondition(edge.condition);
+    if (!optionId) return false;
+    const options = (node.data.options as ChoiceOption[]) ?? [];
+    return options.some(option => option.option_id === optionId);
+  }
+  if (node.type === 'free_text') {
+    return !edge.condition || parseVerdictEdgeCondition(edge.condition) !== null;
+  }
+  return false;
+}
+
+export function normalizeLessonGraph(graph: LessonGraph): LessonGraph {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const nodeIds = new Set(nodes.map(node => node.id));
+  const nodeMap = new Map(nodes.map(node => [node.id, node]));
+  const dedupedEdges = new Map<string, GraphEdge>();
+
+  for (const edge of Array.isArray(graph.edges) ? graph.edges : []) {
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
+      continue;
+    }
+    const node = nodeMap.get(edge.from);
+    if (!node || !isValidEdgeForNode(node, edge)) {
+      continue;
+    }
+    dedupedEdges.set(edgeKey(edge.from, edge.condition), edge);
+  }
+
+  let edges = Array.from(dedupedEdges.values());
+
+  for (const node of nodes) {
+    const defaultTarget = getGraphEdgeTarget(edges, node.id) || nextNodeIdByOrder(nodes, node.id);
+    if (node.type === 'story') {
+      if (!getGraphEdgeTarget(edges, node.id) && defaultTarget) {
+        edges = setGraphEdgeTarget(edges, node.id, undefined, defaultTarget);
+      }
+      continue;
+    }
+
+    if (node.type === 'single_choice') {
+      const options = (node.data.options as ChoiceOption[]) ?? [];
+      for (const option of options) {
+        if (!getGraphEdgeTarget(edges, node.id, optionEdgeCondition(option.option_id)) && defaultTarget) {
+          edges = setGraphEdgeTarget(edges, node.id, optionEdgeCondition(option.option_id), defaultTarget);
+        }
+      }
+      edges = edges.filter(edge => !(edge.from === node.id && !edge.condition));
+      continue;
+    }
+
+    if (node.type === 'free_text') {
+      for (const verdict of ['correct', 'partial', 'incorrect'] as GraphVerdict[]) {
+        if (!getGraphEdgeTarget(edges, node.id, verdictEdgeCondition(verdict)) && defaultTarget) {
+          edges = setGraphEdgeTarget(edges, node.id, verdictEdgeCondition(verdict), defaultTarget);
+        }
+      }
+      edges = edges.filter(edge => !(edge.from === node.id && !edge.condition));
+    }
+  }
+
+  const startNodeId = nodes.some(node => node.id === graph.startNodeId)
+    ? graph.startNodeId
+    : (nodes[0]?.id ?? '');
+
+  return { startNodeId, nodes, edges };
+}
+
 export function isBackendLessonGraph(rawGraph: unknown): rawGraph is Record<string, unknown> {
   if (!rawGraph || typeof rawGraph !== 'object') return false;
   const graph = rawGraph as Record<string, unknown>;
@@ -332,18 +491,13 @@ export function isBackendLessonGraph(rawGraph: unknown): rawGraph is Record<stri
  * Convert editor graph (type/data/edges) to backend format (kind/nextNodeId/options/transitions).
  */
 export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown> {
-  const startNodeId = graph.startNodeId ?? '';
-  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  const edges = Array.isArray(graph.edges) ? graph.edges : [];
-
-  // Build edge map: fromId -> toId (for simple linear edges)
-  const edgeMap = new Map<string, string>();
-  for (const e of edges) {
-    edgeMap.set(e.from, e.to);
-  }
+  const normalizedGraph = normalizeLessonGraph(graph);
+  const startNodeId = normalizedGraph.startNodeId ?? '';
+  const nodes = Array.isArray(normalizedGraph.nodes) ? normalizedGraph.nodes : [];
+  const edges = Array.isArray(normalizedGraph.edges) ? normalizedGraph.edges : [];
 
   const backendNodes: Record<string, unknown>[] = nodes.map(node => {
-    const nextNodeId = edgeMap.get(node.id) ?? '';
+    const nextNodeId = getGraphEdgeTarget(edges, node.id);
     const kind = node.type === 'terminal' ? 'end' : node.type;
 
     if (kind === 'story') {
@@ -368,12 +522,13 @@ export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown
         options: opts.map(o => {
           const optId = o.option_id ?? o.id ?? '';
           const isCorrect = o.is_correct ?? (optId === correctId);
+          const optionNextNodeId = getGraphEdgeTargetWithFallback(edges, node.id, optionEdgeCondition(optId));
           return {
             id: optId,
             text: o.text,
             result: isCorrect ? 'correct' : 'incorrect',
             feedback: isCorrect ? feedbackCorrect : feedbackIncorrect,
-            nextNodeId,
+            nextNodeId: optionNextNodeId,
           };
         }),
       };
@@ -389,9 +544,18 @@ export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown
           criteria: (node.data.criteria as string) ?? '',
         },
         transitions: [
-          { onVerdict: 'correct', nextNodeId },
-          { onVerdict: 'partial', nextNodeId },
-          { onVerdict: 'incorrect', nextNodeId },
+          {
+            onVerdict: 'correct',
+            nextNodeId: getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('correct')),
+          },
+          {
+            onVerdict: 'partial',
+            nextNodeId: getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('partial')),
+          },
+          {
+            onVerdict: 'incorrect',
+            nextNodeId: getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('incorrect')),
+          },
         ],
       };
     }
@@ -435,23 +599,28 @@ export function graphFromBackendFormat(raw: Record<string, unknown>): LessonGrap
       data.options = opts.map(o => {
         const optId = (o.id as string) ?? '';
         if ((o.result as string) === 'correct') correctId = optId;
+        const nextNodeId = (o.nextNodeId as string) ?? '';
+        if (nextNodeId) {
+          edges.push({ from: id, to: nextNodeId, condition: optionEdgeCondition(optId) });
+        }
         return { option_id: optId, text: (o.text as string) ?? '' };
       });
       data.correct_option_id = correctId;
       data.feedback_correct = opts.find(o => (o.result as string) === 'correct')?.feedback ?? '';
       data.feedback_incorrect = opts.find(o => (o.result as string) !== 'correct')?.feedback ?? '';
-      // All options point to same nextNodeId
-      const nextId = (opts[0]?.nextNodeId as string) ?? '';
-      if (nextId) edges.push({ from: id, to: nextId });
     } else if (kind === 'free_text') {
       data.question_text = (rn.prompt as string) ?? '';
       const rubric = (rn.rubric as Record<string, unknown>) ?? {};
       data.reference_answer = (rubric.referenceAnswer ?? rubric.reference_answer ?? '') as string;
       data.criteria = (rubric.criteria as string) ?? '';
       const transitions = (rn.transitions as Array<Record<string, unknown>>) ?? [];
-      const correctTransition = transitions.find(t => (t.onVerdict as string) === 'correct');
-      const nextId = (correctTransition?.nextNodeId as string) ?? '';
-      if (nextId) edges.push({ from: id, to: nextId });
+      for (const transition of transitions) {
+        const verdict = parseVerdictEdgeCondition(verdictEdgeCondition((transition.onVerdict as GraphVerdict) ?? 'correct'));
+        const nextNodeId = (transition.nextNodeId as string) ?? '';
+        if (verdict && nextNodeId) {
+          edges.push({ from: id, to: nextNodeId, condition: verdictEdgeCondition(verdict) });
+        }
+      }
     } else if (kind === 'end') {
       data.text = (rn.text ?? body.text ?? '') as string;
     }
@@ -459,7 +628,7 @@ export function graphFromBackendFormat(raw: Record<string, unknown>): LessonGrap
     nodes.push({ id, type, data });
   }
 
-  return { startNodeId, nodes, edges };
+  return normalizeLessonGraph({ startNodeId, nodes, edges });
 }
 
 export interface TeacherStudent {

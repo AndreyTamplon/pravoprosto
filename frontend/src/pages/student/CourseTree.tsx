@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { getCourseTree, createPurchaseRequest } from '../../api/client';
 import { Button, Badge, Spinner, EmptyState } from '../../components/ui';
@@ -124,9 +124,10 @@ function LessonNodeItem({
 export default function CourseTree() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: tree, loading, error, reload } = useApi(
     () => getCourseTree(courseId!),
-    [courseId],
+    [courseId, location.key],
   );
 
   if (loading) return <Spinner />;
