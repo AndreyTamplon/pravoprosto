@@ -1,12 +1,16 @@
 package httpserver
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"runtime/debug"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,6 +25,7 @@ type requestContextKey string
 const (
 	requestIDHeader                       = "X-Request-Id"
 	requestIDContextKey requestContextKey = "request_id"
+	maxLoggedPathLength                   = 256
 )
 
 func requestIDFromContext(ctx context.Context) string {
@@ -59,12 +64,12 @@ func accessLogMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handle
 			routePattern := routePattern(r)
 			requestLogger := platformlogging.FromContext(r.Context(), logger).With(
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", truncateValue(r.URL.Path, maxLoggedPathLength),
 				"route", routePattern,
 				"status", recorder.status,
 				"duration_ms", time.Since(startedAt).Milliseconds(),
 				"response_bytes", recorder.bytesWritten,
-				"remote_ip", clientIP(r),
+				"client_ip_hash", hashIdentifier(clientIP(r)),
 				"user_agent", truncateValue(r.UserAgent(), 256),
 			)
 
@@ -89,15 +94,17 @@ func recoveryMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					// Intentionally recover and return a JSON 500 so API clients receive
+					// a stable error envelope instead of a dropped connection.
 					platformlogging.FromContext(r.Context(), logger).Error(
 						"panic recovered",
 						"method", r.Method,
 						"path", r.URL.Path,
 						"route", routePattern(r),
-						"panic", fmt.Sprint(recovered),
-						"stack", string(debug.Stack()),
+						"panic", truncateValue(platformlogging.SanitizeText(fmt.Sprint(recovered)), 256),
+						"stack_frames", stackFrames(4, 16),
 					)
-					if recorder, ok := w.(*responseRecorder); !ok || !recorder.Written() {
+					if !responseWritten(w) {
 						writeInternalError(w)
 					}
 				}
@@ -115,6 +122,9 @@ type responseRecorder struct {
 }
 
 func (r *responseRecorder) WriteHeader(status int) {
+	if r.wroteHeader {
+		return
+	}
 	r.status = status
 	r.wroteHeader = true
 	r.ResponseWriter.WriteHeader(status)
@@ -131,6 +141,70 @@ func (r *responseRecorder) Write(body []byte) (int, error) {
 
 func (r *responseRecorder) Written() bool {
 	return r.wroteHeader
+}
+
+func (r *responseRecorder) Flush() {
+	flusher, ok := r.ResponseWriter.(http.Flusher)
+	if !ok {
+		return
+	}
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	flusher.Flush()
+}
+
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("response writer does not support hijacking")
+	}
+	return hijacker.Hijack()
+}
+
+func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
+	pusher, ok := r.ResponseWriter.(http.Pusher)
+	if !ok {
+		return http.ErrNotSupported
+	}
+	return pusher.Push(target, opts)
+}
+
+func (r *responseRecorder) ReadFrom(src io.Reader) (int64, error) {
+	readerFrom, ok := r.ResponseWriter.(io.ReaderFrom)
+	if !ok {
+		return io.Copy(responseRecorderWriter{recorder: r}, src)
+	}
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	written, err := readerFrom.ReadFrom(src)
+	r.addBytesWritten64(written)
+	return written, err
+}
+
+func (r *responseRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+type responseRecorderWriter struct {
+	recorder *responseRecorder
+}
+
+func (w responseRecorderWriter) Write(body []byte) (int, error) {
+	return w.recorder.Write(body)
+}
+
+func (r *responseRecorder) addBytesWritten64(written int64) {
+	if written <= 0 {
+		return
+	}
+	maxInt := int64(^uint(0) >> 1)
+	if int64(r.bytesWritten) >= maxInt-written {
+		r.bytesWritten = int(maxInt)
+		return
+	}
+	r.bytesWritten += int(written)
 }
 
 func routePattern(r *http.Request) string {
@@ -157,6 +231,47 @@ func clientIP(r *http.Request) string {
 		return host
 	}
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func hashIdentifier(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return hex.EncodeToString(sum[:8])
+}
+
+func stackFrames(skip int, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	pcs := make([]uintptr, limit)
+	count := runtime.Callers(skip, pcs)
+	frames := runtime.CallersFrames(pcs[:count])
+	result := make([]string, 0, count)
+	for len(result) < limit {
+		frame, more := frames.Next()
+		result = append(result, fmt.Sprintf("%s:%d %s", frame.File, frame.Line, frame.Function))
+		if !more {
+			break
+		}
+	}
+	return result
+}
+
+func responseWritten(w http.ResponseWriter) bool {
+	for current := w; current != nil; {
+		if recorder, ok := current.(interface{ Written() bool }); ok && recorder.Written() {
+			return true
+		}
+		unwrapper, ok := current.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		current = unwrapper.Unwrap()
+	}
+	return false
 }
 
 func sanitizeRequestID(value string) string {

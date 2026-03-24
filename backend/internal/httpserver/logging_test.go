@@ -1,7 +1,10 @@
 package httpserver
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -69,4 +72,66 @@ func TestRecoveryMiddlewareReturnsInternalErrorWithRequestID(t *testing.T) {
 	if envelope.Error.RequestID != requestID {
 		t.Fatalf("expected error request_id %q to match header %q", envelope.Error.RequestID, requestID)
 	}
+}
+
+func TestResponseRecorderPreservesOptionalInterfaces(t *testing.T) {
+	recorder := &responseRecorder{ResponseWriter: newInterfacePreservingWriter(), status: http.StatusOK}
+
+	if _, ok := any(recorder).(http.Flusher); !ok {
+		t.Fatal("responseRecorder should implement http.Flusher")
+	}
+	if _, ok := any(recorder).(http.Hijacker); !ok {
+		t.Fatal("responseRecorder should implement http.Hijacker")
+	}
+	if _, ok := any(recorder).(http.Pusher); !ok {
+		t.Fatal("responseRecorder should implement http.Pusher")
+	}
+	if _, ok := any(recorder).(io.ReaderFrom); !ok {
+		t.Fatal("responseRecorder should implement io.ReaderFrom")
+	}
+}
+
+func TestResponseRecorderOptionalInterfacesFallBackGracefully(t *testing.T) {
+	recorder := &responseRecorder{ResponseWriter: httptest.NewRecorder(), status: http.StatusOK}
+
+	if _, _, err := recorder.Hijack(); err == nil {
+		t.Fatal("expected hijack to fail when underlying writer does not support it")
+	}
+	if err := recorder.Push("/asset.js", nil); err != http.ErrNotSupported {
+		t.Fatalf("expected ErrNotSupported from Push, got %v", err)
+	}
+	recorder.Flush()
+}
+
+func TestResponseRecorderWriteHeaderKeepsFirstStatus(t *testing.T) {
+	underlying := httptest.NewRecorder()
+	recorder := &responseRecorder{ResponseWriter: underlying, status: http.StatusOK}
+
+	recorder.WriteHeader(http.StatusCreated)
+	recorder.WriteHeader(http.StatusConflict)
+
+	if recorder.status != http.StatusCreated {
+		t.Fatalf("expected recorder to keep first status, got %d", recorder.status)
+	}
+	if underlying.Code != http.StatusCreated {
+		t.Fatalf("expected underlying recorder to keep first status, got %d", underlying.Code)
+	}
+}
+
+type interfacePreservingWriter struct {
+	*httptest.ResponseRecorder
+}
+
+func newInterfacePreservingWriter() *interfacePreservingWriter {
+	return &interfacePreservingWriter{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (w *interfacePreservingWriter) Flush() {}
+
+func (w *interfacePreservingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, nil
+}
+
+func (w *interfacePreservingWriter) Push(string, *http.PushOptions) error {
+	return nil
 }

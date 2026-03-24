@@ -72,8 +72,8 @@ func (p *YandexProvider) Exchange(ctx context.Context, code string, redirectURI 
 
 	token, err := cfg.Exchange(ctx, code)
 	if err != nil {
-		logger.Warn("yandex token exchange failed", "err", err)
-		return ResolvedIdentity{}, fmt.Errorf("yandex token exchange: %w", err)
+		logger.Warn("yandex token exchange failed", "error_message", platformlogging.SanitizeText(err.Error()))
+		return ResolvedIdentity{}, fmt.Errorf("yandex token exchange failed")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.UserInfoURL+"?format=json", nil)
@@ -91,12 +91,12 @@ func (p *YandexProvider) Exchange(ctx context.Context, code string, redirectURI 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logger.Warn("yandex userinfo returned error status", "status", resp.StatusCode)
-		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo status %d: %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		logger.Warn("yandex userinfo returned error status", "status", resp.StatusCode, "response_bytes", len(body))
+		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		logger.Warn("failed to read yandex userinfo response", "err", err)
 		return ResolvedIdentity{}, fmt.Errorf("yandex userinfo read: %w", err)

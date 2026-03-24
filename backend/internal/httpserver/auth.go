@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -140,50 +141,83 @@ func securityHeaders(next http.Handler) http.Handler {
 // token bucket. tokens are replenished at a rate of limit per window.
 func rateLimitByIP(limit int, window time.Duration) func(http.Handler) http.Handler {
 	type bucket struct {
-		tokens int
+		tokens float64
 		last   time.Time
 	}
 	var mu sync.Mutex
 	buckets := make(map[string]*bucket)
+	var lastSweep time.Time
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr
-			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-				ip = strings.TrimSpace(strings.Split(fwd, ",")[0])
-			}
+			ip := requestIPForRateLimit(r)
 
 			mu.Lock()
 			b, ok := buckets[ip]
 			now := time.Now()
+			if lastSweep.IsZero() || now.Sub(lastSweep) >= window {
+				cutoff := now.Add(-2 * window)
+				for key, candidate := range buckets {
+					if candidate.last.Before(cutoff) {
+						delete(buckets, key)
+					}
+				}
+				lastSweep = now
+			}
 			if !ok {
-				b = &bucket{tokens: limit, last: now}
+				b = &bucket{tokens: float64(limit), last: now}
 				buckets[ip] = b
 			}
 			elapsed := now.Sub(b.last)
-			if elapsed >= window {
-				b.tokens = limit
-				b.last = now
-			} else {
-				refill := int(elapsed * time.Duration(limit) / window)
-				b.tokens += refill
-				if b.tokens > limit {
-					b.tokens = limit
+			if elapsed > 0 {
+				b.tokens += elapsed.Seconds() * (float64(limit) / window.Seconds())
+				if b.tokens > float64(limit) {
+					b.tokens = float64(limit)
 				}
-				b.last = now
 			}
-			if b.tokens <= 0 {
+			b.last = now
+			if b.tokens < 1 {
 				mu.Unlock()
 				requestLogger(r.Context(), nil).Warn("request rate limited")
 				writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests", nil)
 				return
 			}
-			b.tokens--
+			b.tokens -= 1
 			mu.Unlock()
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func requestIPForRateLimit(r *http.Request) string {
+	if trustedProxy(r.RemoteAddr) {
+		if fwd := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); fwd != "" {
+			parts := strings.Split(fwd, ",")
+			if len(parts) > 0 {
+				if candidate := strings.TrimSpace(parts[0]); candidate != "" {
+					return candidate
+				}
+			}
+		}
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func trustedProxy(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(remoteAddr)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func requestLogger(ctx context.Context, fallback *slog.Logger) *slog.Logger {
