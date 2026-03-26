@@ -5,6 +5,8 @@ import {
   getLessonSession,
   nextStep,
   submitAnswer,
+  chooseDecision,
+  goBackInLesson,
   getGameState,
 } from '../../api/client';
 import { generateIdempotencyKey, formatMinutesTimer } from '../../utils/format';
@@ -21,6 +23,7 @@ type PlayerScreen =
   | { kind: 'loading' }
   | { kind: 'story'; step: StepView }
   | { kind: 'single_choice'; step: StepView }
+  | { kind: 'decision'; step: StepView }
   | { kind: 'free_text'; step: StepView }
   | { kind: 'end'; step: StepView }
   | { kind: 'checking' }
@@ -158,6 +161,9 @@ export default function LessonPlayer() {
       case 'single_choice':
         setScreen({ kind: 'single_choice', step });
         break;
+      case 'decision':
+        setScreen({ kind: 'decision', step });
+        break;
       case 'free_text':
         setScreen({ kind: 'free_text', step });
         break;
@@ -242,6 +248,38 @@ export default function LessonPlayer() {
     }
   };
 
+  const handleDecision = async () => {
+    if (!currentStep || !selectedOption) return;
+    setSubmitting(true);
+    try {
+      const updated = await chooseDecision(currentStep.session_id, {
+        node_id: currentStep.node_id,
+        option_id: selectedOption,
+        state_version: currentStep.state_version,
+      });
+      setCurrentStep(updated);
+      transitionToStep(updated);
+    } catch (err) {
+      setScreen({ kind: 'error', message: err instanceof Error ? err.message : 'Ошибка выбора' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoBack = async () => {
+    if (!currentStep) return;
+    setSubmitting(true);
+    try {
+      const updated = await goBackInLesson(currentStep.session_id, currentStep.state_version);
+      setCurrentStep(updated);
+      transitionToStep(updated);
+    } catch (err) {
+      setScreen({ kind: 'error', message: err instanceof Error ? err.message : 'Ошибка возврата' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Handle "Next" after feedback
   const handleFeedbackNext = () => {
     if (screen.kind !== 'feedback') return;
@@ -282,7 +320,7 @@ export default function LessonPlayer() {
   const progress = currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
 
   // Extract payload helpers
-  const payload = (screen.kind === 'story' || screen.kind === 'single_choice' || screen.kind === 'free_text' || screen.kind === 'end')
+  const payload = (screen.kind === 'story' || screen.kind === 'single_choice' || screen.kind === 'decision' || screen.kind === 'free_text' || screen.kind === 'end')
     ? screen.step.payload
     : {};
 
@@ -291,6 +329,11 @@ export default function LessonPlayer() {
   const illustrationUrl = (payload as Record<string, unknown>).illustration_url as string | undefined;
   const questionText = ((payload as Record<string, unknown>).prompt ?? (payload as Record<string, unknown>).question_text) as string | undefined;
   const options = (payload as Record<string, unknown>).options as Array<{ id: string; text: string }> | undefined;
+  const canGoBack = Boolean(
+    (screen.kind === 'story' || screen.kind === 'decision' || screen.kind === 'end')
+      ? screen.step.navigation?.can_go_back
+      : currentStep?.navigation?.can_go_back,
+  );
 
   return (
     <div className={styles.playerLayout}>
@@ -336,6 +379,11 @@ export default function LessonPlayer() {
             </SpeechBubble>
 
             <div className={styles.storyActions}>
+              {canGoBack && (
+                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
+                  Назад к выбору
+                </Button>
+              )}
               <Button
                 variant="primary"
                 onClick={handleStoryNext}
@@ -393,6 +441,50 @@ export default function LessonPlayer() {
           </div>
         )}
 
+        {screen.kind === 'decision' && (
+          <div className={styles.questionScreen} data-node-kind="decision" data-role="current-node">
+            <div className={styles.questionText} data-role="prompt">
+              {questionText}
+            </div>
+
+            <div className={styles.options}>
+              {(options ?? []).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-role="option"
+                  data-option-id={opt.id}
+                  className={[
+                    styles.option,
+                    selectedOption === opt.id ? styles.optionSelected : '',
+                    submitting ? styles.optionDisabled : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => !submitting && setSelectedOption(opt.id)}
+                >
+                  {opt.text}
+                </button>
+              ))}
+            </div>
+
+            <div className={styles.submitRow}>
+              {canGoBack && (
+                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
+                  Назад к выбору
+                </Button>
+              )}
+              <Button
+                variant="primary"
+                onClick={handleDecision}
+                disabled={!selectedOption || submitting}
+              >
+                Выбрать
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Free Text */}
         {screen.kind === 'free_text' && (
           <div className={styles.questionScreen} data-node-kind="free_text" data-role="current-node">
@@ -436,6 +528,11 @@ export default function LessonPlayer() {
             </SpeechBubble>
 
             <div className={styles.storyActions}>
+              {canGoBack && (
+                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
+                  Назад к выбору
+                </Button>
+              )}
               <Button
                 variant="primary"
                 onClick={handleEndComplete}

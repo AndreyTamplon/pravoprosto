@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { createFreshStudentPage, openLessonAttempt } from '../../helpers/student-lessons';
 import {
   buildBranchingSingleChoiceLesson,
+  buildMultiVerdictSingleChoiceLesson,
   createAdminCourseWithDraft,
   publishAdminCourse,
 } from '../../helpers/course-builders';
@@ -42,7 +43,9 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await publishAdminCourse(adminPage, courseId);
     await adminContext.close();
 
-    const { context, page } = await createFreshStudentPage(browser, 'branch-choice-retry');
+    const context = await browser.newContext({ storageState: '.auth/student2.json' });
+    const page = await context.newPage();
+    await page.goto('/student/courses');
 
     await expect
       .poll(async () => {
@@ -65,7 +68,7 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await expect(page.locator('[data-role="prompt"]')).toContainText('Что сделаешь сначала?');
 
     await page.getByRole('button', { name: 'Сразу оплачу, пока скидка не пропала' }).click();
-    await page.getByRole('button', { name: 'Проверить' }).click();
+    await page.getByRole('button', { name: 'Проверить', exact: true }).click();
 
     const feedback = page.locator('[data-role="feedback"]');
     await expect(feedback).toBeVisible({ timeout: 10000 });
@@ -88,7 +91,7 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', '4');
     await page.getByRole('button', { name: 'Далее' }).click();
     await page.getByRole('button', { name: 'Проверю отзывы и сравню цену' }).click();
-    await page.getByRole('button', { name: 'Проверить' }).click();
+    await page.getByRole('button', { name: 'Проверить', exact: true }).click();
     const correctFeedback = page.locator('[data-role="feedback"]');
     await expect(correctFeedback).toHaveAttribute('data-verdict', 'correct');
     await expect(correctFeedback).toContainText('Правильно');
@@ -176,7 +179,7 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await expect(page.locator('[data-role="xp"]')).toHaveAttribute('data-value', '0');
 
     await page.getByRole('button', { name: 'Правильный ответ', exact: true }).click();
-    await page.getByRole('button', { name: 'Проверить' }).click();
+    await page.getByRole('button', { name: 'Проверить', exact: true }).click();
 
     const feedback = page.locator('[data-role="feedback"]');
     await expect(feedback).toBeVisible({ timeout: 10000 });
@@ -188,6 +191,85 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await expect(page.locator('[data-role="lesson-complete"]')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-role="lesson-complete"]')).toContainText('+10');
 
+    await context.close();
+  });
+
+  test('multiple correct options and partial option all survive the full student flow', async ({ browser }) => {
+    const adminContext = await browser.newContext({ storageState: '.auth/admin.json' });
+    const adminPage = await adminContext.newPage();
+
+    const lessonId = `multi_verdict_choice_${Date.now()}`;
+    const lesson = buildMultiVerdictSingleChoiceLesson({
+      lessonId,
+      title: 'Multi verdict choice',
+      questionText: 'Что стоит сделать перед оплатой?',
+      correctA: 'Проверить отзывы',
+      correctB: 'Сравнить цену с другими магазинами',
+      partial: 'Посмотреть только красивый дизайн сайта',
+      incorrect: 'Сразу оплатить заказ',
+      successText: 'Полностью правильная ветка.',
+      partialText: 'Почти правильная ветка.',
+      incorrectText: 'Неправильная ветка.',
+    });
+
+    const { courseId } = await createAdminCourseWithDraft(adminPage, {
+      title: `Gate Multi Verdict ${Date.now()}`,
+      description: 'Курс для проверки multiple correct и partial verdict',
+      ageMin: 8,
+      ageMax: 12,
+      modules: [
+        {
+          id: 'module_multi_verdict_choice',
+          title: 'Multi verdict',
+          lessons: [lesson],
+        },
+      ],
+    });
+    await publishAdminCourse(adminPage, courseId);
+    await adminContext.close();
+
+    const context = await browser.newContext({ storageState: '.auth/student.json' });
+    const page = await context.newPage();
+    await page.goto('/student/courses');
+    await expect
+      .poll(async () => {
+        const response = await apiRequest(page, 'GET', `/student/courses/${courseId}`, undefined, {
+          fallbackPath: '/student/courses',
+        });
+        return response.status;
+      }, { timeout: 10000 })
+      .toBe(200);
+
+    const verifyOutcome = async (
+      answerText: string,
+      verdict: 'correct' | 'partial' | 'incorrect',
+      expectedBranch: string,
+      expectedXpText: string,
+      expectedHearts: string,
+    ) => {
+      await openLessonAttempt(page, courseId, lessonId);
+      await expect(page.locator('[data-node-kind="single_choice"]')).toBeVisible({ timeout: 10000 });
+      await page.getByRole('button', { name: answerText, exact: true }).click();
+      await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+
+      const feedback = page.locator('[data-role="feedback"]');
+      await expect(feedback).toBeVisible({ timeout: 10000 });
+      await expect(feedback).toHaveAttribute('data-verdict', verdict);
+      await expect(feedback).toContainText(expectedXpText);
+      await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', expectedHearts);
+
+      await page.getByRole('button', { name: 'Далее' }).click();
+      await expect(page.locator('[data-role="prompt"]')).toContainText(expectedBranch);
+      await page.getByRole('button', { name: 'Далее' }).click();
+      await expect(page.locator('[data-node-kind="end"]')).toBeVisible({ timeout: 10000 });
+      await page.getByRole('button', { name: 'Завершить миссию' }).click();
+      await expect(page.locator('[data-role="lesson-complete"]')).toBeVisible({ timeout: 10000 });
+    };
+
+    await verifyOutcome('Проверить отзывы', 'correct', 'Полностью правильная ветка.', '+10 XP', '5');
+    await verifyOutcome('Сравнить цену с другими магазинами', 'correct', 'Полностью правильная ветка.', '+10 XP', '5');
+    await verifyOutcome('Посмотреть только красивый дизайн сайта', 'partial', 'Почти правильная ветка.', '+5 XP', '5');
+    await verifyOutcome('Сразу оплатить заказ', 'incorrect', 'Неправильная ветка.', '-1 ❤️', '4');
     await context.close();
   });
 });

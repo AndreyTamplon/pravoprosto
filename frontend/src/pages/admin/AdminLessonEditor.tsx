@@ -11,6 +11,7 @@ import type {
   LessonGraph,
   ChoiceOption,
   GraphVerdict,
+  DecisionOption,
 } from '../../api/types';
 import {
   graphToBackendFormat,
@@ -19,14 +20,17 @@ import {
   normalizeLessonGraph,
   optionEdgeCondition,
   verdictEdgeCondition,
-  getGraphEdgeTargetWithFallback,
+  getGraphEdgeTarget,
   setGraphEdgeTarget,
   getForwardTargetNodes,
+  connectMissingNodeOutputs,
+  retargetNodeOutputs,
+  reorderGraphNodes,
 } from '../../api/types';
 import { getDraftValidationErrors } from '../../utils/editorErrors';
 import styles from './AdminLessonEditor.module.css';
 
-type NodeType = 'story' | 'single_choice' | 'free_text' | 'terminal';
+type NodeType = 'story' | 'single_choice' | 'free_text' | 'decision' | 'terminal';
 
 type StoryData = {
   text: string;
@@ -36,22 +40,29 @@ type StoryData = {
 type SingleChoiceData = {
   question_text: string;
   options: ChoiceOption[];
-  correct_option_id: string;
-  feedback_correct: string;
-  feedback_incorrect: string;
+};
+
+type DecisionData = {
+  question_text: string;
+  options: DecisionOption[];
 };
 
 type FreeTextData = {
   question_text: string;
   reference_answer: string;
-  criteria: string;
-  feedback_text: string;
+  criteria_correct: string;
+  criteria_partial: string;
+  criteria_incorrect: string;
+  feedback_correct: string;
+  feedback_partial: string;
+  feedback_incorrect: string;
 };
 
 const NODE_ICONS: Record<NodeType, string> = {
   story: '📖',
   single_choice: '🔘',
   free_text: '✏️',
+  decision: '🧭',
   terminal: '🏁',
 };
 
@@ -59,6 +70,7 @@ const NODE_LABELS: Record<NodeType, string> = {
   story: 'История',
   single_choice: 'Выбор ответа',
   free_text: 'Свободный ответ',
+  decision: 'Развилка сюжета',
   terminal: 'Конец',
 };
 
@@ -70,21 +82,50 @@ function storyData(node: GraphNode): StoryData {
 }
 
 function choiceData(node: GraphNode): SingleChoiceData {
+  const options = ((node.data.options as Array<Record<string, unknown>>) ?? []).map((option) => {
+    const optionId = ((option.option_id ?? option.id) as string) ?? '';
+    const verdict = (option.verdict as GraphVerdict | undefined)
+      ?? (((node.data.correct_option_id as string) ?? '') === optionId ? 'correct' : 'incorrect');
+    const feedback = (option.feedback as string | undefined)
+      ?? (verdict === 'correct'
+        ? ((node.data.feedback_correct as string) ?? '')
+        : ((node.data.feedback_incorrect as string) ?? ''));
+    return {
+      option_id: optionId,
+      text: (option.text as string) ?? '',
+      verdict,
+      feedback,
+    };
+  });
+
   return {
     question_text: (node.data.question_text as string) ?? '',
-    options: (node.data.options as ChoiceOption[]) ?? [],
-    correct_option_id: (node.data.correct_option_id as string) ?? '',
-    feedback_correct: (node.data.feedback_correct as string) ?? '',
-    feedback_incorrect: (node.data.feedback_incorrect as string) ?? '',
+    options,
+  };
+}
+
+function decisionData(node: GraphNode): DecisionData {
+  return {
+    question_text: (node.data.question_text as string) ?? '',
+    options: ((node.data.options as Array<Record<string, unknown>>) ?? []).map(option => ({
+      option_id: ((option.option_id ?? option.id) as string) ?? '',
+      text: (option.text as string) ?? '',
+    })),
   };
 }
 
 function freeTextData(node: GraphNode): FreeTextData {
+  const legacyCriteria = (node.data.criteria as string) ?? '';
+  const legacyFeedback = (node.data.feedback_text as string) ?? '';
   return {
     question_text: (node.data.question_text as string) ?? '',
     reference_answer: (node.data.reference_answer as string) ?? '',
-    criteria: (node.data.criteria as string) ?? '',
-    feedback_text: (node.data.feedback_text as string) ?? '',
+    criteria_correct: (node.data.criteria_correct as string) ?? legacyCriteria,
+    criteria_partial: (node.data.criteria_partial as string) ?? legacyCriteria,
+    criteria_incorrect: (node.data.criteria_incorrect as string) ?? legacyCriteria,
+    feedback_correct: (node.data.feedback_correct as string) ?? legacyFeedback,
+    feedback_partial: (node.data.feedback_partial as string) ?? legacyFeedback,
+    feedback_incorrect: (node.data.feedback_incorrect as string) ?? legacyFeedback,
   };
 }
 
@@ -116,7 +157,56 @@ function nodeDisplayLabel(nodes: GraphNode[], nodeId: string): string {
   if (!node) {
     return nodeId;
   }
-  return `#${index + 1} ${NODE_LABELS[node.type] ?? node.type}`;
+  return `#${index + 1} ${NODE_LABELS[node.type as NodeType] ?? node.type}`;
+}
+
+function createNode(type: NodeType): GraphNode {
+  if (type === 'story') {
+    return { id: generateId(), type, data: { text: '', speaker: '' } };
+  }
+  if (type === 'single_choice') {
+    return {
+      id: generateId(),
+      type,
+      data: {
+        question_text: '',
+        options: [
+          { option_id: generateId(), text: '', verdict: 'correct', feedback: 'Правильно!' },
+          { option_id: generateId(), text: '', verdict: 'incorrect', feedback: 'Неправильно.' },
+        ],
+      },
+    };
+  }
+  if (type === 'decision') {
+    return {
+      id: generateId(),
+      type,
+      data: {
+        question_text: '',
+        options: [
+          { option_id: generateId(), text: '' },
+          { option_id: generateId(), text: '' },
+        ],
+      },
+    };
+  }
+  if (type === 'free_text') {
+    return {
+      id: generateId(),
+      type,
+      data: {
+        question_text: '',
+        reference_answer: '',
+        criteria_correct: '',
+        criteria_partial: '',
+        criteria_incorrect: '',
+        feedback_correct: '',
+        feedback_partial: '',
+        feedback_incorrect: '',
+      },
+    };
+  }
+  return { id: generateId(), type, data: { text: 'Миссия завершена!' } };
 }
 
 export default function AdminLessonEditor() {
@@ -175,6 +265,12 @@ export default function AdminLessonEditor() {
     setGraph(prev => normalizeLessonGraph(updater(prev)));
   }, []);
 
+  const notifyReorder = (clearedEdges: number) => {
+    if (clearedEdges > 0) {
+      setSaveError(`После переноса блока сброшено переходов: ${clearedEdges}. Проверьте связи веток.`);
+    }
+  };
+
   const updateNodeData = (nodeId: string, field: string, value: unknown) => {
     updateGraph(prev => ({
       ...prev,
@@ -185,55 +281,40 @@ export default function AdminLessonEditor() {
   };
 
   const addNode = (type: NodeType) => {
-    const newNode: GraphNode = { id: generateId(), type, data: {} };
-    if (type === 'story') {
-      newNode.data = { text: '', speaker: '' };
-    } else if (type === 'single_choice') {
-      const firstOptionId = generateId();
-      const secondOptionId = generateId();
-      newNode.data = {
-        question_text: '',
-        options: [
-          { option_id: firstOptionId, text: '' },
-          { option_id: secondOptionId, text: '' },
-        ],
-        correct_option_id: firstOptionId,
-        feedback_correct: 'Правильно!',
-        feedback_incorrect: 'Неправильно.',
-      };
-    } else if (type === 'free_text') {
-      newNode.data = { question_text: '', reference_answer: '', criteria: '', feedback_text: '' };
-    } else if (type === 'terminal') {
-      newNode.data = { text: 'Миссия завершена!' };
-    }
-
+    const newNode = createNode(type);
     updateGraph(prev => {
       if (type === 'terminal' && prev.nodes.some(node => node.type === 'terminal')) {
         return prev;
       }
       const terminalNode = prev.nodes.find(node => node.type === 'terminal');
-      const previousContentNode =
-        type !== 'terminal'
-          ? [...prev.nodes.filter(node => node.type !== 'terminal')].at(-1)
-          : undefined;
-      const nextNodes =
-        type !== 'terminal' && terminalNode
-          ? [...prev.nodes.filter(node => node.id !== terminalNode.id), newNode, terminalNode]
-          : [...prev.nodes, newNode];
-      const nextEdges =
-        type !== 'terminal' && terminalNode && previousContentNode
-          ? prev.edges.map(edge =>
-              edge.from === previousContentNode.id && edge.to === terminalNode.id
-                ? { ...edge, to: newNode.id }
-                : edge,
-            )
-          : prev.edges;
-      return {
-        ...prev,
-        nodes: nextNodes,
-        edges: nextEdges,
-        startNodeId: prev.startNodeId || (nextNodes[0]?.id ?? ''),
-      };
+      const nextNodes = [...prev.nodes];
+      if (type !== 'terminal' && terminalNode) {
+        const terminalIndex = nextNodes.findIndex(node => node.id === terminalNode.id);
+        nextNodes.splice(terminalIndex, 0, newNode);
+      } else {
+        nextNodes.push(newNode);
+      }
+
+      let nextEdges = [...prev.edges];
+      const nonTerminalNodes = nextNodes.filter(node => node.type !== 'terminal');
+      const newNonTerminalIndex = nonTerminalNodes.findIndex(node => node.id === newNode.id);
+      const previousContentNode = type === 'terminal'
+        ? [...prev.nodes].at(-1)
+        : (newNonTerminalIndex > 0 ? nonTerminalNodes[newNonTerminalIndex - 1] : undefined);
+
+      if (type === 'terminal' && previousContentNode) {
+        nextEdges = connectMissingNodeOutputs(nextEdges, previousContentNode, newNode.id);
+      } else if (type !== 'terminal' && terminalNode && previousContentNode) {
+        nextEdges = retargetNodeOutputs(nextEdges, previousContentNode, terminalNode.id, newNode.id);
+        nextEdges = connectMissingNodeOutputs(nextEdges, newNode, terminalNode.id);
+      } else if (previousContentNode) {
+        nextEdges = connectMissingNodeOutputs(nextEdges, previousContentNode, newNode.id);
+      }
+
+      const nextStartNodeId = prev.startNodeId && nextNodes.some(node => node.id === prev.startNodeId)
+        ? prev.startNodeId
+        : (nextNodes[0]?.id ?? '');
+      return { ...prev, nodes: nextNodes, edges: nextEdges, startNodeId: nextStartNodeId };
     });
   };
 
@@ -250,32 +331,30 @@ export default function AdminLessonEditor() {
     });
   };
 
-  const addOption = (nodeId: string) => {
-    updateGraph(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(node => {
-        if (node.id !== nodeId) return node;
-        const options = (node.data.options as ChoiceOption[]) ?? [];
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            options: [...options, { option_id: generateId(), text: '' }],
-          },
-        };
-      }),
-    }));
+  const moveNodeUp = (index: number) => {
+    if (index === 0) return;
+    const result = reorderGraphNodes(graph, index, index - 1);
+    setGraph(result.graph);
+    notifyReorder(result.clearedEdges);
   };
 
-  const updateOptionText = (nodeId: string, optionId: string, text: string) => {
+  const moveNodeDown = (index: number) => {
+    if (index >= graph.nodes.length - 1) return;
+    const result = reorderGraphNodes(graph, index, index + 1);
+    setGraph(result.graph);
+    notifyReorder(result.clearedEdges);
+  };
+
+  const addOption = (nodeId: string, type: 'single_choice' | 'decision') => {
     updateGraph(prev => ({
       ...prev,
       nodes: prev.nodes.map(node => {
         if (node.id !== nodeId) return node;
-        const options = ((node.data.options as ChoiceOption[]) ?? []).map(option =>
-          option.option_id === optionId ? { ...option, text } : option,
-        );
-        return { ...node, data: { ...node.data, options } };
+        const options = (node.data.options as Array<ChoiceOption | DecisionOption>) ?? [];
+        const nextOption = type === 'single_choice'
+          ? { option_id: generateId(), text: '', verdict: 'incorrect' as GraphVerdict, feedback: '' }
+          : { option_id: generateId(), text: '' };
+        return { ...node, data: { ...node.data, options: [...options, nextOption] } };
       }),
     }));
   };
@@ -285,26 +364,37 @@ export default function AdminLessonEditor() {
       ...prev,
       nodes: prev.nodes.map(node => {
         if (node.id !== nodeId) return node;
-        const options = ((node.data.options as ChoiceOption[]) ?? []).filter(option => option.option_id !== optionId);
-        const correctId = (node.data.correct_option_id as string) ?? '';
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            options,
-            correct_option_id: correctId === optionId ? (options[0]?.option_id ?? '') : correctId,
-          },
-        };
+        const options = ((node.data.options as Array<ChoiceOption | DecisionOption>) ?? []).filter(option => option.option_id !== optionId);
+        return { ...node, data: { ...node.data, options } };
       }),
-      edges: prev.edges.filter(edge => !(
-        edge.from === nodeId
-        && edge.condition === optionEdgeCondition(optionId)
-      )),
+      edges: prev.edges.filter(edge => !(edge.from === nodeId && edge.condition === optionEdgeCondition(optionId))),
     }));
   };
 
-  const setCorrectOption = (nodeId: string, optionId: string) => {
-    updateNodeData(nodeId, 'correct_option_id', optionId);
+  const updateChoiceOption = (nodeId: string, optionId: string, patch: Partial<ChoiceOption>) => {
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const options = choiceData(node).options.map(option =>
+          option.option_id === optionId ? { ...option, ...patch } : option,
+        );
+        return { ...node, data: { ...node.data, options } };
+      }),
+    }));
+  };
+
+  const updateDecisionOption = (nodeId: string, optionId: string, patch: Partial<DecisionOption>) => {
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const options = decisionData(node).options.map(option =>
+          option.option_id === optionId ? { ...option, ...patch } : option,
+        );
+        return { ...node, data: { ...node.data, options } };
+      }),
+    }));
   };
 
   const setStoryNextNode = (nodeId: string, targetId: string) => {
@@ -330,19 +420,20 @@ export default function AdminLessonEditor() {
 
   const describeOutgoingEdges = (node: GraphNode): string[] => {
     if (node.type === 'story') {
-      const targetId = getGraphEdgeTargetWithFallback(edges, node.id);
+      const targetId = getGraphEdgeTarget(edges, node.id);
       return targetId ? [`Далее -> ${nodeDisplayLabel(nodes, targetId)}`] : [];
     }
-    if (node.type === 'single_choice') {
-      return choiceData(node).options.flatMap(option => {
-        const targetId = getGraphEdgeTargetWithFallback(edges, node.id, optionEdgeCondition(option.option_id));
+    if (node.type === 'single_choice' || node.type === 'decision') {
+      const options = node.type === 'single_choice' ? choiceData(node).options : decisionData(node).options;
+      return options.flatMap(option => {
+        const targetId = getGraphEdgeTarget(edges, node.id, optionEdgeCondition(option.option_id));
         if (!targetId) return [];
         return [`${option.text || 'Без текста'} -> ${nodeDisplayLabel(nodes, targetId)}`];
       });
     }
     if (node.type === 'free_text') {
       return (['correct', 'partial', 'incorrect'] as GraphVerdict[]).flatMap(verdict => {
-        const targetId = getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition(verdict));
+        const targetId = getGraphEdgeTarget(edges, node.id, verdictEdgeCondition(verdict));
         if (!targetId) return [];
         return [`${verdict} -> ${nodeDisplayLabel(nodes, targetId)}`];
       });
@@ -454,15 +545,21 @@ export default function AdminLessonEditor() {
           <EmptyState icon="🧩" title="Нет нод" description="Добавьте ноды для урока" />
         )}
 
-        {nodes.map(node => (
+        {nodes.map((node, index) => (
           <div key={node.id} className={styles.nodeCard}>
             <div className={styles.nodeHeader}>
               <div className={styles.nodeType}>
-                <span className={styles.nodeTypeIcon}>{NODE_ICONS[node.type]}</span>
-                <span className={styles.nodeTypeName}>{NODE_LABELS[node.type]}</span>
+                <span className={styles.nodeTypeIcon}>{NODE_ICONS[node.type as NodeType]}</span>
+                <span className={styles.nodeTypeName}>{NODE_LABELS[node.type as NodeType]}</span>
                 {node.id === startNodeId && <Badge color="teal">Старт</Badge>}
               </div>
               <div className={styles.nodeActions}>
+                <Button size="sm" variant="ghost" onClick={() => moveNodeUp(index)} disabled={index === 0} type="button">
+                  &uarr;
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => moveNodeDown(index)} disabled={index === nodes.length - 1} type="button">
+                  &darr;
+                </Button>
                 {node.type !== 'terminal' && (
                   <Button size="sm" variant="ghost" onClick={() => deleteNode(node.id)} type="button">
                     Удалить
@@ -489,7 +586,7 @@ export default function AdminLessonEditor() {
                   />
                   <Select
                     label="Следующий блок"
-                    value={getGraphEdgeTargetWithFallback(edges, node.id)}
+                    value={getGraphEdgeTarget(edges, node.id)}
                     onChange={event => setStoryNextNode(node.id, event.target.value)}
                   >
                     <option value="">Выберите следующий блок</option>
@@ -518,34 +615,44 @@ export default function AdminLessonEditor() {
                       {data.options.map(option => (
                         <div key={option.option_id} className={styles.optionBlock}>
                           <div className={styles.optionRow}>
-                            <button
-                              className={`${styles.correctToggle} ${data.correct_option_id === option.option_id ? styles.correctToggleActive : ''}`}
-                              onClick={() => setCorrectOption(node.id, option.option_id)}
-                              type="button"
-                              title="Отметить правильный вариант"
-                            >
-                              {data.correct_option_id === option.option_id ? '✓' : ''}
-                            </button>
                             <input
                               className={styles.optionInput}
                               value={option.text}
-                              onChange={event => updateOptionText(node.id, option.option_id, event.target.value)}
+                              onChange={event => updateChoiceOption(node.id, option.option_id, { text: event.target.value })}
                               placeholder="Вариант ответа"
                             />
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => removeOption(node.id, option.option_id)}
-                              type="button"
-                              aria-label="Удалить вариант"
-                              title="Удалить вариант"
-                            >
-                              &times;
-                            </Button>
+                            {data.options.length > 2 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removeOption(node.id, option.option_id)}
+                                type="button"
+                                aria-label="Удалить вариант"
+                                title="Удалить вариант"
+                              >
+                                &times;
+                              </Button>
+                            )}
                           </div>
                           <Select
+                            label="Оценка варианта"
+                            value={option.verdict ?? 'incorrect'}
+                            onChange={event => updateChoiceOption(node.id, option.option_id, { verdict: event.target.value as GraphVerdict })}
+                          >
+                            <option value="correct">Правильный</option>
+                            <option value="partial">Почти правильный</option>
+                            <option value="incorrect">Неправильный</option>
+                          </Select>
+                          <Textarea
+                            label="Обратная связь для этого варианта"
+                            value={option.feedback ?? ''}
+                            onChange={event => updateChoiceOption(node.id, option.option_id, { feedback: event.target.value })}
+                            placeholder="Что увидит ученик после выбора этого варианта"
+                            rows={2}
+                          />
+                          <Select
                             label="Переход после этого ответа"
-                            value={getGraphEdgeTargetWithFallback(edges, node.id, optionEdgeCondition(option.option_id))}
+                            value={getGraphEdgeTarget(edges, node.id, optionEdgeCondition(option.option_id))}
                             onChange={event => setOptionNextNode(node.id, option.option_id, event.target.value)}
                           >
                             <option value="">Выберите следующий блок</option>
@@ -557,24 +664,67 @@ export default function AdminLessonEditor() {
                           </Select>
                         </div>
                       ))}
-                      <Button size="sm" variant="secondary" onClick={() => addOption(node.id)} type="button">
+                      <Button size="sm" variant="secondary" onClick={() => addOption(node.id, 'single_choice')} type="button">
                         + Вариант
                       </Button>
                     </div>
+                  </>
+                );
+              })()}
+
+              {node.type === 'decision' && (() => {
+                const data = decisionData(node);
+                return (
+                  <>
                     <Textarea
-                      label="Обратная связь (правильно)"
-                      value={data.feedback_correct}
-                      onChange={event => updateNodeData(node.id, 'feedback_correct', event.target.value)}
-                      placeholder="Что увидит ученик при правильном ответе"
+                      label="Текст выбора"
+                      value={data.question_text}
+                      onChange={event => updateNodeData(node.id, 'question_text', event.target.value)}
+                      placeholder="Опишите сюжетный выбор..."
                       rows={2}
                     />
-                    <Textarea
-                      label="Обратная связь (неправильно)"
-                      value={data.feedback_incorrect}
-                      onChange={event => updateNodeData(node.id, 'feedback_incorrect', event.target.value)}
-                      placeholder="Что увидит ученик при неправильном ответе"
-                      rows={2}
-                    />
+                    <div className={styles.nodeFieldGroup}>
+                      <div className={styles.nodeFieldLabel}>Варианты сюжетного выбора</div>
+                      {data.options.map(option => (
+                        <div key={option.option_id} className={styles.optionBlock}>
+                          <div className={styles.optionRow}>
+                            <input
+                              className={styles.optionInput}
+                              value={option.text}
+                              onChange={event => updateDecisionOption(node.id, option.option_id, { text: event.target.value })}
+                              placeholder="Вариант выбора"
+                            />
+                            {data.options.length > 2 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removeOption(node.id, option.option_id)}
+                                type="button"
+                                aria-label="Удалить вариант"
+                                title="Удалить вариант"
+                              >
+                                &times;
+                              </Button>
+                            )}
+                          </div>
+                          <Select
+                            label="Переход после выбора"
+                            value={getGraphEdgeTarget(edges, node.id, optionEdgeCondition(option.option_id))}
+                            onChange={event => setOptionNextNode(node.id, option.option_id, event.target.value)}
+                          >
+                            <option value="">Выберите следующий блок</option>
+                            {getForwardTargetNodes(nodes, node.id).map(target => (
+                              <option key={target.id} value={target.id}>
+                                {nodeDisplayLabel(nodes, target.id)}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      ))}
+                      <Button size="sm" variant="secondary" onClick={() => addOption(node.id, 'decision')} type="button">
+                        + Вариант выбора
+                      </Button>
+                    </div>
                   </>
                 );
               })()}
@@ -596,23 +746,59 @@ export default function AdminLessonEditor() {
                       onChange={event => updateNodeData(node.id, 'reference_answer', event.target.value)}
                       placeholder="Правильный ответ"
                     />
+                    <div style={{ border: 'var(--border-thin)', borderRadius: 12, padding: '12px 14px', background: 'rgba(13,148,136,0.06)' }}>
+                      <div style={{ fontWeight: 800, marginBottom: 6 }}>Как писать критерии оценивания</div>
+                      <div style={{ fontSize: '0.92rem', lineHeight: 1.5 }}>
+                        Формулируйте наблюдаемые признаки ответа. Для `правильно` перечислите обязательные идеи.
+                        Для `почти правильно` опишите, что уже есть, но чего ещё не хватает. Для `неверно`
+                        укажите типичные ошибки, отсутствие ключевой мысли или неверный вывод.
+                      </div>
+                    </div>
                     <Textarea
-                      label="Критерии оценивания"
-                      value={data.criteria}
-                      onChange={event => updateNodeData(node.id, 'criteria', event.target.value)}
-                      placeholder="На что ориентироваться при оценке ответа"
+                      label="Критерии правильного ответа"
+                      value={data.criteria_correct}
+                      onChange={event => updateNodeData(node.id, 'criteria_correct', event.target.value)}
+                      placeholder="Что обязательно должно быть в сильном ответе"
                       rows={2}
                     />
                     <Textarea
-                      label="Обратная связь"
-                      value={data.feedback_text}
-                      onChange={event => updateNodeData(node.id, 'feedback_text', event.target.value)}
-                      placeholder="Текст обратной связи"
+                      label="Критерии частично верного ответа"
+                      value={data.criteria_partial}
+                      onChange={event => updateNodeData(node.id, 'criteria_partial', event.target.value)}
+                      placeholder="Что уже неплохо, но ещё не дотягивает до полного ответа"
+                      rows={2}
+                    />
+                    <Textarea
+                      label="Критерии неверного ответа"
+                      value={data.criteria_incorrect}
+                      onChange={event => updateNodeData(node.id, 'criteria_incorrect', event.target.value)}
+                      placeholder="Какие ответы считаем неверными или не по делу"
+                      rows={2}
+                    />
+                    <Textarea
+                      label="Обратная связь при правильном ответе"
+                      value={data.feedback_correct}
+                      onChange={event => updateNodeData(node.id, 'feedback_correct', event.target.value)}
+                      placeholder="Что увидит ученик при правильном ответе"
+                      rows={2}
+                    />
+                    <Textarea
+                      label="Обратная связь при частично верном ответе"
+                      value={data.feedback_partial}
+                      onChange={event => updateNodeData(node.id, 'feedback_partial', event.target.value)}
+                      placeholder="Что увидит ученик при частично верном ответе"
+                      rows={2}
+                    />
+                    <Textarea
+                      label="Обратная связь при неправильном ответе"
+                      value={data.feedback_incorrect}
+                      onChange={event => updateNodeData(node.id, 'feedback_incorrect', event.target.value)}
+                      placeholder="Что увидит ученик при неправильном ответе"
                       rows={2}
                     />
                     <Select
                       label="Следующий блок при правильном ответе"
-                      value={getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('correct'))}
+                      value={getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('correct'))}
                       onChange={event => setFreeTextNextNode(node.id, 'correct', event.target.value)}
                     >
                       <option value="">Выберите следующий блок</option>
@@ -624,7 +810,7 @@ export default function AdminLessonEditor() {
                     </Select>
                     <Select
                       label="Следующий блок при частично верном ответе"
-                      value={getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('partial'))}
+                      value={getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('partial'))}
                       onChange={event => setFreeTextNextNode(node.id, 'partial', event.target.value)}
                     >
                       <option value="">Выберите следующий блок</option>
@@ -636,7 +822,7 @@ export default function AdminLessonEditor() {
                     </Select>
                     <Select
                       label="Следующий блок при неправильном ответе"
-                      value={getGraphEdgeTargetWithFallback(edges, node.id, verdictEdgeCondition('incorrect'))}
+                      value={getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('incorrect'))}
                       onChange={event => setFreeTextNextNode(node.id, 'incorrect', event.target.value)}
                     >
                       <option value="">Выберите следующий блок</option>
@@ -675,6 +861,7 @@ export default function AdminLessonEditor() {
       <div className={styles.addNodeBar}>
         <Button size="sm" variant="secondary" onClick={() => addNode('story')} type="button">📖 История</Button>
         <Button size="sm" variant="secondary" onClick={() => addNode('single_choice')} type="button">🔘 Выбор ответа</Button>
+        <Button size="sm" variant="secondary" onClick={() => addNode('decision')} type="button">🧭 Развилка сюжета</Button>
         <Button size="sm" variant="secondary" onClick={() => addNode('free_text')} type="button">✏️ Свободный ответ</Button>
         <Button size="sm" variant="secondary" onClick={() => addNode('terminal')} type="button">🏁 Конец</Button>
       </div>

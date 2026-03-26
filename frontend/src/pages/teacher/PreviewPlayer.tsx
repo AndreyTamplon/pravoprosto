@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getPreviewSession, previewNext, previewAnswer } from '../../api/client';
+import { getPreviewSession, previewNext, previewAnswer, previewChooseDecision, previewGoBack } from '../../api/client';
 import type { PreviewAnswerView, PreviewStepView } from '../../api/types';
 import { Button, ComicPanel, ProgressBar, Spinner, Badge } from '../../components/ui';
 import s from './PreviewPlayer.module.css';
@@ -95,6 +95,40 @@ export default function PreviewPlayer() {
     }
   }, [currentStep, freeTextAnswer, previewSessionId, selectedOption]);
 
+  const handleDecision = useCallback(async () => {
+    if (!currentStep || !selectedOption) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const session = await previewChooseDecision(previewSessionId!, {
+        node_id: currentStep.node_id,
+        option_id: selectedOption,
+        state_version: currentStep.state_version,
+      });
+      setCurrentStep(session.step);
+      resetTransientState();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Ошибка выбора');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [currentStep, previewSessionId, resetTransientState, selectedOption]);
+
+  const handleBack = useCallback(async () => {
+    if (!currentStep) return;
+    setAdvancing(true);
+    setError(null);
+    try {
+      const session = await previewGoBack(previewSessionId!, currentStep.state_version);
+      setCurrentStep(session.step);
+      resetTransientState();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Ошибка возврата');
+    } finally {
+      setAdvancing(false);
+    }
+  }, [currentStep, previewSessionId, resetTransientState]);
+
   const handleContinueAfterFeedback = useCallback(() => {
     if (answerResult?.next_step) {
       setCurrentStep(answerResult.next_step);
@@ -110,6 +144,7 @@ export default function PreviewPlayer() {
 
   const isStory = currentStep?.node_kind === 'story';
   const isChoice = currentStep?.node_kind === 'single_choice';
+  const isDecision = currentStep?.node_kind === 'decision';
   const isFreeText = currentStep?.node_kind === 'free_text';
   const isEnd = currentStep?.node_kind === 'end';
   const progressPct = completed ? 100 : currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
@@ -119,6 +154,7 @@ export default function PreviewPlayer() {
   const illustrationUrl = (payload.asset_url as string | undefined) ?? undefined;
   const questionText = (payload.prompt ?? payload.question_text) as string | undefined;
   const options = payload.options as Array<{ id: string; text: string }> | undefined;
+  const canGoBack = Boolean(currentStep?.navigation?.can_go_back);
 
   return (
     <div className={s.page}>
@@ -154,8 +190,8 @@ export default function PreviewPlayer() {
         {!completed && currentStep && !answerResult && (
           <ComicPanel>
             <div className={s.stepCard} data-node-kind={currentStep.node_kind} data-role="current-node">
-              <Badge variant={isStory ? 'teal' : isChoice ? 'orange' : isEnd ? 'lime' : 'pink'}>
-                {isStory ? 'История' : isChoice ? 'Вопрос' : isEnd ? 'Конец этапа' : 'Свободный ответ'}
+              <Badge variant={isStory ? 'teal' : isChoice ? 'orange' : isDecision ? 'teal' : isEnd ? 'lime' : 'pink'}>
+                {isStory ? 'История' : isChoice ? 'Вопрос' : isDecision ? 'Развилка' : isEnd ? 'Конец этапа' : 'Свободный ответ'}
               </Badge>
 
               {isStory && (
@@ -165,6 +201,11 @@ export default function PreviewPlayer() {
                     <img src={illustrationUrl} alt="Иллюстрация" className={s.storyIllustration} />
                   )}
                   <div className={s.actionBar}>
+                    {canGoBack && (
+                      <Button variant="outline" onClick={handleBack} disabled={advancing}>
+                        Назад к выбору
+                      </Button>
+                    )}
                     <Button onClick={handleNext} disabled={advancing}>
                       {advancing ? 'Загрузка...' : 'Далее'}
                     </Button>
@@ -197,6 +238,36 @@ export default function PreviewPlayer() {
                 </>
               )}
 
+              {isDecision && (
+                <>
+                  <div className={s.questionText} data-role="prompt">{questionText}</div>
+                  <div className={s.optionsList}>
+                    {options?.map(option => (
+                      <button
+                        key={option.id}
+                        data-role="option"
+                        data-option-id={option.id}
+                        className={`${s.optionBtn} ${selectedOption === option.id ? s.selected : ''}`}
+                        onClick={() => setSelectedOption(option.id)}
+                        type="button"
+                      >
+                        {option.text}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={s.actionBar}>
+                    {canGoBack && (
+                      <Button variant="outline" onClick={handleBack} disabled={advancing || submitting}>
+                        Назад к выбору
+                      </Button>
+                    )}
+                    <Button onClick={handleDecision} disabled={submitting || !selectedOption}>
+                      {submitting ? 'Загрузка...' : 'Выбрать'}
+                    </Button>
+                  </div>
+                </>
+              )}
+
               {isFreeText && (
                 <>
                   <div className={s.questionText} data-role="prompt">{questionText}</div>
@@ -218,6 +289,11 @@ export default function PreviewPlayer() {
                 <>
                   <div className={s.storyText} data-role="prompt">{storyText || 'Конец этапа'}</div>
                   <div className={s.actionBar}>
+                    {canGoBack && (
+                      <Button variant="outline" onClick={handleBack} disabled={advancing}>
+                        Назад к выбору
+                      </Button>
+                    )}
                     <Button onClick={handleNext}>Завершить предпросмотр</Button>
                   </div>
                 </>

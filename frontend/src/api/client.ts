@@ -51,6 +51,15 @@ function translateApiMessage(status: number, code: string, message: string): str
   if (code === 'llm_temporarily_unavailable') {
     return 'Проверка ответа временно недоступна. Попробуйте позже.';
   }
+  if (code === 'lesson_session_back_unavailable') {
+    return 'Сейчас нельзя вернуться к предыдущему сюжетному выбору.';
+  }
+  if (code === 'invalid_decision_option') {
+    return 'Этот вариант выбора больше недоступен. Обновите страницу и попробуйте снова.';
+  }
+  if (code === 'decision_on_non_decision_node') {
+    return 'Сюжетный выбор доступен только в точках развилки.';
+  }
   if (code === 'manual_payment_mismatch') {
     return 'Сумма или валюта оплаты не совпадают с заказом. Укажите причину вручную.';
   }
@@ -142,6 +151,7 @@ function normalizeAccessLink(raw: Record<string, unknown>): import('./types').Ac
 }
 
 function normalizePreviewStep(raw: Record<string, unknown>): import('./types').PreviewStepView {
+  const navigation = ((raw.navigation as Record<string, unknown> | undefined) ?? {});
   return {
     session_id: (raw.session_id ?? '') as string,
     course_id: (raw.course_id ?? '') as string,
@@ -153,6 +163,40 @@ function normalizePreviewStep(raw: Record<string, unknown>): import('./types').P
     steps_completed: (raw.steps_completed ?? 0) as number,
     steps_total: (raw.steps_total ?? 0) as number,
     progress_ratio: (raw.progress_ratio ?? 0) as number,
+    navigation: {
+      can_go_back: Boolean(navigation.can_go_back),
+      back_kind: (navigation.back_kind as import('./types').StepNavigation['back_kind']) ?? null,
+      back_target_node_id: (navigation.back_target_node_id as string) ?? undefined,
+    },
+  };
+}
+
+function normalizeStep(raw: Record<string, unknown>): import('./types').StepView {
+  const navigation = ((raw.navigation as Record<string, unknown> | undefined) ?? {});
+  const gameState = ((raw.game_state as Record<string, unknown>) ?? {});
+  return {
+    session_id: (raw.session_id ?? '') as string,
+    course_id: (raw.course_id ?? '') as string,
+    lesson_id: (raw.lesson_id ?? '') as string,
+    state_version: (raw.state_version ?? 0) as number,
+    node_id: (raw.node_id ?? '') as string,
+    node_kind: (raw.node_kind ?? '') as string,
+    payload: ((raw.payload as Record<string, unknown>) ?? {}),
+    steps_completed: (raw.steps_completed ?? 0) as number,
+    steps_total: (raw.steps_total ?? 0) as number,
+    progress_ratio: (raw.progress_ratio ?? 0) as number,
+    game_state: {
+      xp_total: (gameState.xp_total ?? 0) as number,
+      level: (gameState.level ?? 1) as number,
+      hearts_current: (gameState.hearts_current ?? 5) as number,
+      hearts_max: (gameState.hearts_max ?? 5) as number,
+      hearts_restore_at: (gameState.hearts_restore_at as string | null | undefined) ?? null,
+    },
+    navigation: {
+      can_go_back: Boolean(navigation.can_go_back),
+      back_kind: (navigation.back_kind as import('./types').StepNavigation['back_kind']) ?? null,
+      back_target_node_id: (navigation.back_target_node_id as string) ?? undefined,
+    },
   };
 }
 
@@ -251,13 +295,36 @@ export const getPromoCourses = () => getList<import('./types').PromoCourse>('/pu
 export const getStudentCatalog = () => get<import('./types').CatalogResponse>('/student/catalog');
 export const getGameState = () => get<import('./types').GameState>('/student/game-state');
 export const getCourseTree = (courseId: string) => get<import('./types').CourseTree>(`/student/courses/${courseId}`);
-export const startLesson = (courseId: string, lessonId: string) => post<import('./types').StepView>(`/student/courses/${courseId}/lessons/${lessonId}/start`);
-export const getLessonSession = (courseId: string, lessonId: string) => get<import('./types').StepView>(`/student/courses/${courseId}/lessons/${lessonId}/session`);
-export const getSessionById = (sessionId: string) => get<import('./types').StepView>(`/student/lesson-sessions/${sessionId}`);
-export const nextStep = (sessionId: string, stateVersion: number, expectedNodeId: string) => post<import('./types').StepView>(`/student/lesson-sessions/${sessionId}/next`, { state_version: stateVersion, expected_node_id: expectedNodeId });
-export const submitAnswer = (sessionId: string, body: { node_id: string; answer: unknown; state_version: number }, idempotencyKey: string) =>
-  post<import('./types').AnswerOutcome>(`/student/lesson-sessions/${sessionId}/answer`, body, { 'Idempotency-Key': idempotencyKey });
-export const retryLesson = (courseId: string, lessonId: string) => post<import('./types').StepView>(`/student/courses/${courseId}/lessons/${lessonId}/retry`);
+export const startLesson = async (courseId: string, lessonId: string) =>
+  normalizeStep(await post<Record<string, unknown>>(`/student/courses/${courseId}/lessons/${lessonId}/start`));
+export const getLessonSession = async (courseId: string, lessonId: string) =>
+  normalizeStep(await get<Record<string, unknown>>(`/student/courses/${courseId}/lessons/${lessonId}/session`));
+export const getSessionById = async (sessionId: string) =>
+  normalizeStep(await get<Record<string, unknown>>(`/student/lesson-sessions/${sessionId}`));
+export const nextStep = async (sessionId: string, stateVersion: number, expectedNodeId: string) =>
+  normalizeStep(await post<Record<string, unknown>>(`/student/lesson-sessions/${sessionId}/next`, { state_version: stateVersion, expected_node_id: expectedNodeId }));
+export const chooseDecision = async (sessionId: string, body: { node_id: string; option_id: string; state_version: number }) =>
+  normalizeStep(await post<Record<string, unknown>>(`/student/lesson-sessions/${sessionId}/decision`, body));
+export const goBackInLesson = async (sessionId: string, stateVersion: number) =>
+  normalizeStep(await post<Record<string, unknown>>(`/student/lesson-sessions/${sessionId}/back`, { state_version: stateVersion }));
+export const submitAnswer = async (sessionId: string, body: { node_id: string; answer: unknown; state_version: number }, idempotencyKey: string) => {
+  const raw = await post<Record<string, unknown>>(`/student/lesson-sessions/${sessionId}/answer`, body, { 'Idempotency-Key': idempotencyKey });
+  return {
+    verdict: (raw.verdict ?? 'incorrect') as import('./types').AnswerOutcome['verdict'],
+    feedback_text: (raw.feedback_text ?? '') as string,
+    xp_delta: (raw.xp_delta ?? 0) as number,
+    hearts_delta: (raw.hearts_delta ?? 0) as number,
+    game_state: normalizeStep({
+      game_state: raw.game_state,
+    }).game_state,
+    next_action: (raw.next_action ?? '') as string,
+    next_node_id: (raw.next_node_id as string | undefined) ?? undefined,
+    lesson_completion: (raw.lesson_completion as Record<string, unknown> | null | undefined) ?? null,
+    next_step: raw.next_step ? normalizeStep(raw.next_step as Record<string, unknown>) : null,
+  };
+};
+export const retryLesson = async (courseId: string, lessonId: string) =>
+  normalizeStep(await post<Record<string, unknown>>(`/student/courses/${courseId}/lessons/${lessonId}/retry`));
 export const claimGuardianLink = (token: string) => post<void>('/student/guardian-links/claim', { token });
 export const claimCourseLink = (token: string) => post<void>('/student/course-links/claim', { token });
 export const createPurchaseRequest = (offerId: string) => post<void>(`/student/offers/${offerId}/purchase-requests`);
@@ -395,6 +462,14 @@ export const getPreviewSession = async (previewSessionId: string): Promise<impor
 };
 export const previewNext = async (previewSessionId: string, stateVersion: number, expectedNodeId: string): Promise<import('./types').PreviewSessionView> => {
   const raw = await post<Record<string, unknown>>(`/preview-sessions/${previewSessionId}/next`, { state_version: stateVersion, expected_node_id: expectedNodeId });
+  return normalizePreviewSession(raw);
+};
+export const previewChooseDecision = async (previewSessionId: string, body: { node_id: string; option_id: string; state_version: number }): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/preview-sessions/${previewSessionId}/decision`, body);
+  return normalizePreviewSession(raw);
+};
+export const previewGoBack = async (previewSessionId: string, stateVersion: number): Promise<import('./types').PreviewSessionView> => {
+  const raw = await post<Record<string, unknown>>(`/preview-sessions/${previewSessionId}/back`, { state_version: stateVersion });
   return normalizePreviewSession(raw);
 };
 export const previewAnswer = async (previewSessionId: string, body: { node_id: string; answer: unknown; state_version: number }): Promise<import('./types').PreviewAnswerView> => {

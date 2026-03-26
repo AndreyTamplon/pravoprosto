@@ -43,24 +43,24 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
     await publishAdminCourse(adminPage, courseId);
     await adminContext.close();
 
+    const { context, page } = await createFreshStudentPage(browser, 'free-text-branches');
+    await expect
+      .poll(async () => {
+        const response = await apiRequest(page, 'GET', `/student/courses/${courseId}`, undefined, {
+          fallbackPath: '/student/courses',
+        });
+        return response.status;
+      }, { timeout: 10000 })
+      .toBe(200);
+
     const verifyBranch = async (
-      codePrefix: string,
       answer: string,
       verdict: 'correct' | 'partial' | 'incorrect',
+      expectedFeedback: string,
       branchText: string,
       expectedHearts: string,
       expectedXpText: string,
     ) => {
-      const { context, page } = await createFreshStudentPage(browser, codePrefix);
-      await expect
-        .poll(async () => {
-          const response = await apiRequest(page, 'GET', `/student/courses/${courseId}`, undefined, {
-            fallbackPath: '/student/courses',
-          });
-          return response.status;
-        }, { timeout: 10000 })
-        .toBe(200);
-
       await openLessonAttempt(page, courseId, lessonId);
       await page.getByRole('button', { name: 'Далее' }).click();
       await expect(page.locator('[data-node-kind="free_text"]')).toBeVisible({ timeout: 10000 });
@@ -70,6 +70,7 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       const feedback = page.locator('[data-role="feedback"]');
       await expect(feedback).toBeVisible({ timeout: 15000 });
       await expect(feedback).toHaveAttribute('data-verdict', verdict);
+      await expect(feedback).toContainText(expectedFeedback);
       await expect(feedback).toContainText(expectedXpText);
       await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', expectedHearts);
 
@@ -80,32 +81,32 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       await expect(page.locator('[data-node-kind="end"]')).toBeVisible({ timeout: 10000 });
       await page.getByRole('button', { name: 'Завершить миссию' }).click();
       await expect(page.locator('[data-role="lesson-complete"]')).toBeVisible({ timeout: 10000 });
-      await context.close();
     };
 
     await verifyBranch(
-      'free-text-correct',
       '[llm:correct] один взлом откроет доступ ко всем аккаунтам',
       'correct',
+      'Отлично, ты указал ключевой риск.',
       'Верный маршрут',
       '5',
       '+10 XP',
     );
     await verifyBranch(
-      'free-text-partial',
       '[llm:partial] потому что это опасно',
       'partial',
+      'Ход мысли верный, но ответ пока неполный.',
       'Частично верный маршрут',
       '5',
       '+5 XP',
     );
     await verifyBranch(
-      'free-text-incorrect',
       '[llm:incorrect] просто так нельзя',
       'incorrect',
+      'Ответ не объясняет основной риск.',
       'Неверный маршрут',
       '4',
       '-1 ❤️',
     );
+    await context.close();
   });
 });

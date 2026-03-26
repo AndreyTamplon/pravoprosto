@@ -234,7 +234,16 @@ export function buildBranchingFreeTextLesson(params: {
       prompt: params.questionText,
       rubric: {
         referenceAnswer: params.referenceAnswer,
-        criteria: params.criteria,
+        criteriaByVerdict: {
+          correct: params.criteria,
+          partial: params.criteria,
+          incorrect: params.criteria,
+        },
+        feedbackByVerdict: {
+          correct: 'Отлично, ты указал ключевой риск.',
+          partial: 'Ход мысли верный, но ответ пока неполный.',
+          incorrect: 'Ответ не объясняет основной риск.',
+        },
       },
       transitions: [
         { onVerdict: 'correct', nextNodeId: correctId },
@@ -273,6 +282,90 @@ export function buildBranchingFreeTextLesson(params: {
     graph: {
       startNodeId: introId,
       nodes,
+    },
+  };
+}
+
+export function buildMultiVerdictSingleChoiceLesson(params: {
+  lessonId: string;
+  title: string;
+  questionText: string;
+  correctA: string;
+  correctB: string;
+  partial: string;
+  incorrect: string;
+  successText: string;
+  partialText: string;
+  incorrectText: string;
+}): DraftLessonDefinition {
+  const questionId = `${params.lessonId}_question`;
+  const successId = `${params.lessonId}_success`;
+  const partialId = `${params.lessonId}_partial`;
+  const incorrectId = `${params.lessonId}_incorrect`;
+  const endId = `${params.lessonId}_end`;
+
+  return {
+    id: params.lessonId,
+    title: params.title,
+    graph: {
+      startNodeId: questionId,
+      nodes: [
+        {
+          id: questionId,
+          kind: 'single_choice',
+          prompt: params.questionText,
+          options: [
+            { id: `${params.lessonId}_correct_a`, text: params.correctA, result: 'correct', feedback: 'Это полноценный правильный ответ.', nextNodeId: successId },
+            { id: `${params.lessonId}_correct_b`, text: params.correctB, result: 'correct', feedback: 'Тоже правильный ход.', nextNodeId: successId },
+            { id: `${params.lessonId}_partial`, text: params.partial, result: 'partial', feedback: 'Почти верно, но не хватает важного шага.', nextNodeId: partialId },
+            { id: `${params.lessonId}_incorrect`, text: params.incorrect, result: 'incorrect', feedback: 'Это опасный выбор.', nextNodeId: incorrectId },
+          ],
+        },
+        { id: successId, kind: 'story', body: { text: params.successText }, nextNodeId: endId },
+        { id: partialId, kind: 'story', body: { text: params.partialText }, nextNodeId: endId },
+        { id: incorrectId, kind: 'story', body: { text: params.incorrectText }, nextNodeId: endId },
+        { id: endId, kind: 'end', text: 'Миссия завершена!' },
+      ],
+    },
+  };
+}
+
+export function buildDecisionBranchingLesson(params: {
+  lessonId: string;
+  title: string;
+  introText: string;
+  decisionText: string;
+  branchAText: string;
+  branchBText: string;
+}): DraftLessonDefinition {
+  const introId = `${params.lessonId}_intro`;
+  const decisionId = `${params.lessonId}_decision`;
+  const branchAId = `${params.lessonId}_branch_a`;
+  const branchBId = `${params.lessonId}_branch_b`;
+  const branchAStoryId = `${params.lessonId}_branch_a_story`;
+  const branchBStoryId = `${params.lessonId}_branch_b_story`;
+  const endId = `${params.lessonId}_end`;
+
+  return {
+    id: params.lessonId,
+    title: params.title,
+    graph: {
+      startNodeId: introId,
+      nodes: [
+        { id: introId, kind: 'story', body: { text: params.introText }, nextNodeId: decisionId },
+        {
+          id: decisionId,
+          kind: 'decision',
+          prompt: params.decisionText,
+          options: [
+            { id: branchAId, text: 'Сначала проверить факты', nextNodeId: branchAStoryId },
+            { id: branchBId, text: 'Сразу принять решение', nextNodeId: branchBStoryId },
+          ],
+        },
+        { id: branchAStoryId, kind: 'story', body: { text: params.branchAText }, nextNodeId: endId },
+        { id: branchBStoryId, kind: 'story', body: { text: params.branchBText }, nextNodeId: endId },
+        { id: endId, kind: 'end', text: 'Финал развилки' },
+      ],
     },
   };
 }

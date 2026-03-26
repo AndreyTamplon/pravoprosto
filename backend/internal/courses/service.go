@@ -130,6 +130,13 @@ type StepView struct {
 	StepsTotal     int            `json:"steps_total"`
 	ProgressRatio  float64        `json:"progress_ratio"`
 	GameState      any            `json:"game_state"`
+	Navigation     StepNavigation `json:"navigation"`
+}
+
+type StepNavigation struct {
+	CanGoBack        bool    `json:"can_go_back"`
+	BackKind         *string `json:"back_kind,omitempty"`
+	BackTargetNodeID *string `json:"back_target_node_id,omitempty"`
 }
 
 type ReviewStatusView struct {
@@ -639,13 +646,16 @@ func (s *Service) startPreviewFromDraft(role string, actorID string, draft Draft
 	s.mu.Lock()
 	s.evictPreviewsLocked(time.Now())
 	session := &previewSession{
-		ID:           sessionID,
-		OwnerRole:    role,
-		OwnerID:      actorID,
-		CourseID:     draft.CourseID,
-		LessonID:     lessonID,
-		ReturnPath:   returnPath,
-		Graph:        graph,
+		ID:         sessionID,
+		OwnerRole:  role,
+		OwnerID:    actorID,
+		CourseID:   draft.CourseID,
+		LessonID:   lessonID,
+		ReturnPath: returnPath,
+		Graph:      graph,
+		History: []previewPathEntry{
+			{NodeID: graph.StartNodeID, NodeKind: startNode.Kind, Active: true},
+		},
 		CurrentID:    graph.StartNodeID,
 		StateVersion: 1,
 		LastTouched:  time.Now(),
@@ -741,6 +751,7 @@ func (s *Service) PreviewNext(_ context.Context, role string, actorID string, pr
 	}
 	session.StateVersion++
 	session.CurrentID = node.NextNodeID
+	appendPreviewHistory(session, session.Graph.NodeMap[session.CurrentID], "")
 	session.LastTouched = time.Now()
 	return buildPreviewEnvelope(session), nil
 }
@@ -766,13 +777,16 @@ func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string
 			if option.ID == optionID {
 				session.StateVersion++
 				session.CurrentID = option.NextNodeID
+				appendPreviewHistory(session, session.Graph.NodeMap[session.CurrentID], "")
 				session.LastTouched = time.Now()
 				nextNode := session.Graph.NodeMap[session.CurrentID]
+				step := buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, nextNode)
+				step.Navigation = previewNavigation(session)
 				return PreviewAnswerOutcome{
 					Preview:      true,
 					Verdict:      option.Result,
 					FeedbackText: option.Feedback,
-					NextStep:     ptrStep(buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, nextNode)),
+					NextStep:     ptrStep(step),
 				}, nil
 			}
 		}
@@ -780,9 +794,12 @@ func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string
 	case "free_text":
 		text, _ := answer["text"].(string)
 		result, err := s.evaluator.Evaluate(ctx, evaluation.FreeTextEvaluationInput{
-			Prompt:          node.Prompt,
-			ReferenceAnswer: asString(node.Rubric["referenceAnswer"]),
-			StudentAnswer:   text,
+			Prompt:            node.Prompt,
+			ReferenceAnswer:   asString(node.Rubric["referenceAnswer"]),
+			CriteriaCorrect:   firstNonEmpty(asString(mapNestedValue(node.Rubric, "criteriaByVerdict", "correct")), asString(node.Rubric["criteria"])),
+			CriteriaPartial:   firstNonEmpty(asString(mapNestedValue(node.Rubric, "criteriaByVerdict", "partial")), asString(node.Rubric["criteria"])),
+			CriteriaIncorrect: firstNonEmpty(asString(mapNestedValue(node.Rubric, "criteriaByVerdict", "incorrect")), asString(node.Rubric["criteria"])),
+			StudentAnswer:     text,
 		})
 		if err != nil {
 			if errors.Is(err, evaluation.ErrTemporarilyUnavailable) {
@@ -796,17 +813,96 @@ func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string
 		}
 		session.StateVersion++
 		session.CurrentID = nextNodeID
+		appendPreviewHistory(session, session.Graph.NodeMap[session.CurrentID], "")
 		session.LastTouched = time.Now()
 		nextNode := session.Graph.NodeMap[session.CurrentID]
+		step := buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, nextNode)
+		step.Navigation = previewNavigation(session)
 		return PreviewAnswerOutcome{
 			Preview:      true,
 			Verdict:      result.Verdict,
-			FeedbackText: result.Feedback,
-			NextStep:     ptrStep(buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, nextNode)),
+			FeedbackText: previewFreeTextFeedback(node.Rubric, result.Verdict, result.Feedback),
+			NextStep:     ptrStep(step),
 		}, nil
 	default:
 		return PreviewAnswerOutcome{}, ErrInvalidPreviewAction
 	}
+}
+
+func (s *Service) PreviewDecision(_ context.Context, role string, actorID string, previewSessionID string, stateVersion int64, nodeID string, optionID string) (PreviewStepEnvelope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, err := s.loadPreviewLocked(previewSessionID, role, actorID, time.Now())
+	if err != nil {
+		return PreviewStepEnvelope{}, err
+	}
+	if session.StateVersion != stateVersion || session.CurrentID != nodeID {
+		return PreviewStepEnvelope{}, ErrPreviewStateConflict
+	}
+	node := session.Graph.NodeMap[session.CurrentID]
+	if node.Kind != "decision" {
+		return PreviewStepEnvelope{}, ErrInvalidPreviewAction
+	}
+	for _, option := range node.Options {
+		if option.ID != optionID {
+			continue
+		}
+		session.StateVersion++
+		session.CurrentID = option.NextNodeID
+		appendPreviewHistory(session, session.Graph.NodeMap[session.CurrentID], optionID)
+		session.LastTouched = time.Now()
+		return buildPreviewEnvelope(session), nil
+	}
+	return PreviewStepEnvelope{}, ErrInvalidPreviewAction
+}
+
+func (s *Service) PreviewBack(_ context.Context, role string, actorID string, previewSessionID string, stateVersion int64) (PreviewStepEnvelope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, err := s.loadPreviewLocked(previewSessionID, role, actorID, time.Now())
+	if err != nil {
+		return PreviewStepEnvelope{}, err
+	}
+	if session.StateVersion != stateVersion {
+		return PreviewStepEnvelope{}, ErrPreviewStateConflict
+	}
+	currentIndex := latestActivePreviewHistoryIndex(session)
+	if currentIndex <= 0 {
+		return PreviewStepEnvelope{}, ErrInvalidPreviewAction
+	}
+	targetIndex := -1
+	for index := currentIndex - 1; index >= 0; index-- {
+		if session.History[index].Active && session.History[index].NodeKind == "decision" {
+			targetIndex = index
+			break
+		}
+	}
+	if targetIndex < 0 {
+		return PreviewStepEnvelope{}, ErrInvalidPreviewAction
+	}
+	for index := targetIndex + 1; index < len(session.History); index++ {
+		session.History[index].Active = false
+	}
+	session.StateVersion++
+	session.CurrentID = session.History[targetIndex].NodeID
+	session.LastTouched = time.Now()
+	return buildPreviewEnvelope(session), nil
+}
+
+func previewFreeTextFeedback(rubric map[string]any, verdict string, fallback string) string {
+	feedbackByVerdict, _ := rubric["feedbackByVerdict"].(map[string]any)
+	if feedback := strings.TrimSpace(asString(feedbackByVerdict[verdict])); feedback != "" {
+		return feedback
+	}
+	return fallback
+}
+
+func mapNestedValue(root map[string]any, key string, nested string) any {
+	raw, ok := root[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return raw[nested]
 }
 
 func (s *Service) SubmitReview(ctx context.Context, teacherID string, courseID string) (map[string]any, error) {

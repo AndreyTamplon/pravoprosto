@@ -25,6 +25,7 @@ func TestMigrations_ApplyAndCriticalIndexesExist(t *testing.T) {
 		      'uq_entitlements_active_course',
 		      'uq_entitlements_active_lesson',
 		      'uq_lesson_sessions_active',
+		      'idx_lesson_session_path_entries_active',
 		      'uq_course_progress_active',
 		      'uq_course_reviews_pending_draft'
 		  )
@@ -32,8 +33,8 @@ func TestMigrations_ApplyAndCriticalIndexesExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query indexes: %v", err)
 	}
-	if count != 10 {
-		t.Fatalf("expected 10 critical indexes, got %d", count)
+	if count != 11 {
+		t.Fatalf("expected 11 critical indexes, got %d", count)
 	}
 
 	var triggerExists bool

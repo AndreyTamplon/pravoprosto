@@ -490,6 +490,13 @@ func renderStep(sessionID string, courseID string, lessonID string, stateVersion
 			options = append(options, map[string]any{"id": option.ID, "text": option.Text})
 		}
 		payload["options"] = options
+	case "decision":
+		payload["prompt"] = node.Prompt
+		options := make([]map[string]any, 0, len(node.Options))
+		for _, option := range node.Options {
+			options = append(options, map[string]any{"id": option.ID, "text": option.Text})
+		}
+		payload["options"] = options
 	case "free_text":
 		payload["prompt"] = node.Prompt
 	}
@@ -519,6 +526,7 @@ func renderStep(sessionID string, courseID string, lessonID string, stateVersion
 		StepsTotal:     len(graph.Order),
 		ProgressRatio:  progress,
 		GameState:      state.toMini(),
+		Navigation:     StepNavigation{},
 	}
 }
 
@@ -554,9 +562,12 @@ func (s *Service) evaluateNode(ctx context.Context, node runtimeNode, answer map
 		}
 	case "free_text":
 		result, err := s.evaluator.Evaluate(ctx, evaluation.FreeTextEvaluationInput{
-			Prompt:          node.Prompt,
-			ReferenceAnswer: asStringAny(node.Rubric["referenceAnswer"]),
-			StudentAnswer:   asStringAny(answer["text"]),
+			Prompt:            node.Prompt,
+			ReferenceAnswer:   asStringAny(node.Rubric["referenceAnswer"]),
+			CriteriaCorrect:   firstNonEmptyStringAny(nestedMapValue(node.Rubric, "criteriaByVerdict", "correct"), node.Rubric["criteria"]),
+			CriteriaPartial:   firstNonEmptyStringAny(nestedMapValue(node.Rubric, "criteriaByVerdict", "partial"), node.Rubric["criteria"]),
+			CriteriaIncorrect: firstNonEmptyStringAny(nestedMapValue(node.Rubric, "criteriaByVerdict", "incorrect"), node.Rubric["criteria"]),
+			StudentAnswer:     asStringAny(answer["text"]),
 		})
 		if err != nil {
 			if errors.Is(err, evaluation.ErrTemporarilyUnavailable) {
@@ -576,7 +587,7 @@ func (s *Service) evaluateNode(ctx context.Context, node runtimeNode, answer map
 		}
 		return evaluationOutcome{
 			Verdict:          result.Verdict,
-			Feedback:         result.Feedback,
+			Feedback:         freeTextFeedback(node.Rubric, result.Verdict, result.Feedback),
 			NextNodeID:       nextNodeID,
 			EvaluatorType:    "llm_free_text",
 			EvaluatorLatency: &latency,
@@ -584,6 +595,34 @@ func (s *Service) evaluateNode(ctx context.Context, node runtimeNode, answer map
 		}, nil
 	}
 	return evaluationOutcome{}, ErrLessonSessionStateConflict
+}
+
+func nestedMapValue(root map[string]any, key string, nested string) any {
+	if root == nil {
+		return nil
+	}
+	raw, ok := root[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return raw[nested]
+}
+
+func freeTextFeedback(rubric map[string]any, verdict string, fallback string) string {
+	feedbackByVerdict, _ := rubric["feedbackByVerdict"].(map[string]any)
+	if feedback := strings.TrimSpace(asStringAny(feedbackByVerdict[verdict])); feedback != "" {
+		return feedback
+	}
+	return fallback
+}
+
+func firstNonEmptyStringAny(values ...any) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(asStringAny(value)); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (s *Service) ensureCourseProgressTx(ctx context.Context, tx pgx.Tx, studentID string, courseID string, revisionID string, lessonID string) (string, error) {

@@ -103,6 +103,10 @@
   border-left-color: var(--pink);
 }
 
+.nodeCard.decision {
+  border-left-color: var(--teal);
+}
+
 .nodeCard.terminal {
   border-left-color: var(--lime);
 }

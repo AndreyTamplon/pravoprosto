@@ -47,9 +47,17 @@ type previewSession struct {
 	LessonID     string
 	ReturnPath   string
 	Graph        lessonGraph
+	History      []previewPathEntry
 	CurrentID    string
 	StateVersion int64
 	LastTouched  time.Time
+}
+
+type previewPathEntry struct {
+	NodeID           string
+	NodeKind         string
+	DecisionOptionID string
+	Active           bool
 }
 
 type revisionLesson struct {
@@ -151,6 +159,16 @@ func buildStepView(sessionID string, courseID string, lessonID string, stateVers
 			})
 		}
 		payload["options"] = options
+	case "decision":
+		payload["prompt"] = node.Prompt
+		options := make([]map[string]any, 0, len(node.Options))
+		for _, option := range node.Options {
+			options = append(options, map[string]any{
+				"id":   option.ID,
+				"text": option.Text,
+			})
+		}
+		payload["options"] = options
 	case "free_text":
 		payload["prompt"] = node.Prompt
 	case "end":
@@ -180,6 +198,7 @@ func buildStepView(sessionID string, courseID string, lessonID string, stateVers
 		StepsTotal:     total,
 		ProgressRatio:  progress,
 		GameState:      nil,
+		Navigation:     StepNavigation{},
 	}
 }
 
@@ -218,12 +237,53 @@ func ptrStep(step StepView) *StepView {
 
 func buildPreviewEnvelope(session *previewSession) PreviewStepEnvelope {
 	node := session.Graph.NodeMap[session.CurrentID]
+	step := buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, node)
+	step.Navigation = previewNavigation(session)
 	return PreviewStepEnvelope{
 		Preview:          true,
 		PreviewSessionID: session.ID,
 		ReturnPath:       session.ReturnPath,
-		Step:             buildStepView(session.ID, session.CourseID, session.LessonID, session.StateVersion, session.Graph, session.CurrentID, node),
+		Step:             step,
 	}
+}
+
+func previewNavigation(session *previewSession) StepNavigation {
+	currentIndex := latestActivePreviewHistoryIndex(session)
+	if currentIndex <= 0 {
+		return StepNavigation{}
+	}
+	for index := currentIndex - 1; index >= 0; index-- {
+		entry := session.History[index]
+		if !entry.Active || entry.NodeKind != "decision" {
+			continue
+		}
+		backKind := "decision"
+		backTargetNodeID := entry.NodeID
+		return StepNavigation{
+			CanGoBack:        true,
+			BackKind:         &backKind,
+			BackTargetNodeID: &backTargetNodeID,
+		}
+	}
+	return StepNavigation{}
+}
+
+func latestActivePreviewHistoryIndex(session *previewSession) int {
+	for index := len(session.History) - 1; index >= 0; index-- {
+		if session.History[index].Active {
+			return index
+		}
+	}
+	return -1
+}
+
+func appendPreviewHistory(session *previewSession, node graphNode, decisionOptionID string) {
+	session.History = append(session.History, previewPathEntry{
+		NodeID:           node.ID,
+		NodeKind:         node.Kind,
+		DecisionOptionID: decisionOptionID,
+		Active:           true,
+	})
 }
 
 func firstNonEmpty(values ...string) string {

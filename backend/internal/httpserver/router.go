@@ -523,6 +523,70 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusOK, view)
 			}, deps)))
+			sr.Post("/lesson-sessions/{sessionID}/decision", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				stateVersion, nodeID, optionID, err := lessonruntime.DecodeDecisionRequest(r)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+					return
+				}
+				view, err := deps.LessonRuntime.Decision(r.Context(), session.AccountID, chi.URLParam(r, "sessionID"), stateVersion, nodeID, optionID)
+				if err != nil {
+					switch err {
+					case lessonruntime.ErrDecisionOnNonDecisionNode:
+						writeError(w, http.StatusConflict, "decision_on_non_decision_node", "Decision is only allowed on decision nodes", nil)
+					case lessonruntime.ErrInvalidDecisionOption:
+						writeError(w, http.StatusConflict, "invalid_decision_option", "Decision option is invalid", nil)
+					case lessonruntime.ErrLessonSessionNotFound:
+						writeError(w, http.StatusNotFound, "lesson_session_not_found", "Lesson session not found", nil)
+					case lessonruntime.ErrLessonSessionNotActive:
+						writeError(w, http.StatusConflict, "lesson_session_not_active", "Lesson session not active", nil)
+					case lessonruntime.ErrLessonSessionStateConflict:
+						writeError(w, http.StatusConflict, "lesson_session_state_conflict", "Lesson session state conflict", nil)
+					case lessonruntime.ErrLockedTeacherAccess:
+						writeError(w, http.StatusForbidden, "locked_teacher_access", "Teacher course access is locked", nil)
+					case lessonruntime.ErrContentLockedPaid:
+						writeError(w, http.StatusConflict, "content_locked_paid", "Content is locked by paywall", nil)
+					case lessonruntime.ErrContentAccessAwaitingConfirmation:
+						writeError(w, http.StatusConflict, "content_access_awaiting_confirmation", "Content awaits payment confirmation", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}, deps)))
+			sr.Post("/lesson-sessions/{sessionID}/back", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				stateVersion, err := lessonruntime.DecodeBackRequest(r)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+					return
+				}
+				view, err := deps.LessonRuntime.Back(r.Context(), session.AccountID, chi.URLParam(r, "sessionID"), stateVersion)
+				if err != nil {
+					switch err {
+					case lessonruntime.ErrLessonSessionBackUnavailable:
+						writeError(w, http.StatusConflict, "lesson_session_back_unavailable", "No previous narrative choice is available", nil)
+					case lessonruntime.ErrLessonSessionNotFound:
+						writeError(w, http.StatusNotFound, "lesson_session_not_found", "Lesson session not found", nil)
+					case lessonruntime.ErrLessonSessionNotActive:
+						writeError(w, http.StatusConflict, "lesson_session_not_active", "Lesson session not active", nil)
+					case lessonruntime.ErrLessonSessionStateConflict:
+						writeError(w, http.StatusConflict, "lesson_session_state_conflict", "Lesson session state conflict", nil)
+					case lessonruntime.ErrLockedTeacherAccess:
+						writeError(w, http.StatusForbidden, "locked_teacher_access", "Teacher course access is locked", nil)
+					case lessonruntime.ErrContentLockedPaid:
+						writeError(w, http.StatusConflict, "content_locked_paid", "Content is locked by paywall", nil)
+					case lessonruntime.ErrContentAccessAwaitingConfirmation:
+						writeError(w, http.StatusConflict, "content_access_awaiting_confirmation", "Content awaits payment confirmation", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}, deps)))
 			sr.Post("/courses/{courseID}/lessons/{lessonID}/retry", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 				session, _ := sessionFromContext(r.Context())
 				view, err := deps.LessonRuntime.Retry(r.Context(), session.AccountID, chi.URLParam(r, "courseID"), chi.URLParam(r, "lessonID"))
@@ -1418,6 +1482,52 @@ func NewRouter(deps Dependencies) http.Handler {
 					writeError(w, http.StatusConflict, "invalid_preview_action", "Invalid preview action", nil)
 				case courses.ErrPreviewEvaluationUnavailable:
 					writeError(w, http.StatusServiceUnavailable, "llm_temporarily_unavailable", "LLM is temporarily unavailable", nil)
+				default:
+					writeInternalError(w)
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
+		}, deps)))
+		r.Post("/preview-sessions/{previewSessionID}/decision", requireAnyRole([]string{"teacher", "admin"}, deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+			session, _ := sessionFromContext(r.Context())
+			stateVersion, nodeID, optionID, err := lessonruntime.DecodeDecisionRequest(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+				return
+			}
+			view, err := deps.Courses.PreviewDecision(r.Context(), session.Role, session.AccountID, chi.URLParam(r, "previewSessionID"), stateVersion, nodeID, optionID)
+			if err != nil {
+				switch err {
+				case courses.ErrPreviewSessionNotFound:
+					writeError(w, http.StatusNotFound, "preview_session_not_found", "Preview session not found", nil)
+				case courses.ErrPreviewStateConflict:
+					writeError(w, http.StatusConflict, "preview_session_state_conflict", "Preview session state conflict", nil)
+				case courses.ErrInvalidPreviewAction:
+					writeError(w, http.StatusConflict, "invalid_preview_action", "Invalid preview action", nil)
+				default:
+					writeInternalError(w)
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
+		}, deps)))
+		r.Post("/preview-sessions/{previewSessionID}/back", requireAnyRole([]string{"teacher", "admin"}, deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+			session, _ := sessionFromContext(r.Context())
+			stateVersion, err := lessonruntime.DecodeBackRequest(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+				return
+			}
+			view, err := deps.Courses.PreviewBack(r.Context(), session.Role, session.AccountID, chi.URLParam(r, "previewSessionID"), stateVersion)
+			if err != nil {
+				switch err {
+				case courses.ErrPreviewSessionNotFound:
+					writeError(w, http.StatusNotFound, "preview_session_not_found", "Preview session not found", nil)
+				case courses.ErrPreviewStateConflict:
+					writeError(w, http.StatusConflict, "preview_session_state_conflict", "Preview session state conflict", nil)
+				case courses.ErrInvalidPreviewAction:
+					writeError(w, http.StatusConflict, "invalid_preview_action", "Invalid preview action", nil)
 				default:
 					writeInternalError(w)
 				}

@@ -21,9 +21,12 @@ type FreeTextEvaluator interface {
 }
 
 type FreeTextEvaluationInput struct {
-	Prompt          string
-	ReferenceAnswer string
-	StudentAnswer   string
+	Prompt            string
+	ReferenceAnswer   string
+	CriteriaCorrect   string
+	CriteriaPartial   string
+	CriteriaIncorrect string
+	StudentAnswer     string
 }
 
 type Result struct {
@@ -72,9 +75,13 @@ func (a *openAICompatibleAdapter) Evaluate(ctx context.Context, input FreeTextEv
 			},
 			{
 				"role": "user",
-				"content": fmt.Sprintf("PROMPT:%s\nREFERENCE:%s\nANSWER:%s",
+				"content": fmt.Sprintf(
+					"PROMPT:%s\nREFERENCE:%s\nCRITERIA_CORRECT:%s\nCRITERIA_PARTIAL:%s\nCRITERIA_INCORRECT:%s\nANSWER:%s",
 					input.Prompt,
 					input.ReferenceAnswer,
+					input.CriteriaCorrect,
+					input.CriteriaPartial,
+					input.CriteriaIncorrect,
 					input.StudentAnswer,
 				),
 			},

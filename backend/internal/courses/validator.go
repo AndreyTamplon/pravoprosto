@@ -260,6 +260,36 @@ func collectTargets(node map[string]any, basePath string, nodeIndex int, errors 
 				targets = append(targets, nextID)
 			}
 		}
+		if !hasCorrectOption(options) {
+			*errors = append(*errors, ValidationError{
+				Path:    fmt.Sprintf("%s.nodes[%d].options", basePath, nodeIndex),
+				Code:    "missing_correct_option",
+				Message: "Single choice node must define at least one correct option",
+			})
+		}
+	case "decision":
+		options, _ := node["options"].([]any)
+		if len(options) < 2 {
+			*errors = append(*errors, ValidationError{
+				Path:    fmt.Sprintf("%s.nodes[%d].options", basePath, nodeIndex),
+				Code:    "missing_decision_options",
+				Message: "Decision node must define at least two options",
+			})
+		}
+		for optionIndex, rawOption := range options {
+			option, _ := rawOption.(map[string]any)
+			nextID := asString(option["nextNodeId"])
+			if asString(option["id"]) == "" || asString(option["text"]) == "" || nextID == "" {
+				*errors = append(*errors, ValidationError{
+					Path:    fmt.Sprintf("%s.nodes[%d].options[%d]", basePath, nodeIndex, optionIndex),
+					Code:    "invalid_decision_option",
+					Message: "Decision option must define id, text, and nextNodeId",
+				})
+			}
+			if nextID != "" {
+				targets = append(targets, nextID)
+			}
+		}
 	case "free_text":
 		transitions, _ := node["transitions"].([]any)
 		found := map[string]bool{}
@@ -287,6 +317,7 @@ func collectTargets(node map[string]any, basePath string, nodeIndex int, errors 
 				})
 			}
 		}
+		validateFreeTextRubric(node, fmt.Sprintf("%s.nodes[%d]", basePath, nodeIndex), errors)
 	case "end":
 	default:
 		*errors = append(*errors, ValidationError{
@@ -306,4 +337,45 @@ func asString(value any) string {
 func asBool(value any) bool {
 	boolean, _ := value.(bool)
 	return boolean
+}
+
+func hasCorrectOption(options []any) bool {
+	for _, rawOption := range options {
+		option, _ := rawOption.(map[string]any)
+		if asString(option["result"]) == "correct" {
+			return true
+		}
+	}
+	return false
+}
+
+func validateFreeTextRubric(node map[string]any, path string, errors *[]ValidationError) {
+	rubric, _ := node["rubric"].(map[string]any)
+	if rubric == nil {
+		return
+	}
+	criteriaByVerdict, hasCriteriaByVerdict := rubric["criteriaByVerdict"].(map[string]any)
+	if hasCriteriaByVerdict {
+		for _, verdict := range []string{"correct", "partial", "incorrect"} {
+			if asString(criteriaByVerdict[verdict]) == "" {
+				*errors = append(*errors, ValidationError{
+					Path:    path + ".rubric.criteriaByVerdict." + verdict,
+					Code:    "missing_free_text_criteria",
+					Message: "Free text rubric must define criteria for every verdict",
+				})
+			}
+		}
+	}
+	feedbackByVerdict, hasFeedbackByVerdict := rubric["feedbackByVerdict"].(map[string]any)
+	if hasFeedbackByVerdict {
+		for _, verdict := range []string{"correct", "partial", "incorrect"} {
+			if asString(feedbackByVerdict[verdict]) == "" {
+				*errors = append(*errors, ValidationError{
+					Path:    path + ".rubric.feedbackByVerdict." + verdict,
+					Code:    "missing_free_text_feedback",
+					Message: "Free text rubric must define student feedback for every verdict",
+				})
+			}
+		}
+	}
 }
