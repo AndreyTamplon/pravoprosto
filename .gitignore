@@ -3,6 +3,7 @@ materials
 .env
 .env.local
 .env.production
+.DS_Store
 *.pem
 *.key
 id_rsa

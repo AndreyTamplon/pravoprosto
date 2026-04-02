@@ -13,14 +13,62 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	platformconfig "pravoprost/backend/internal/platform/config"
 )
 
 type Service struct {
-	db *pgxpool.Pool
+	db                    *pgxpool.Pool
+	tbankTerminalKey      string
+	tbankPassword         string
+	tbankAPIBaseURL       string
+	tbankNotificationURL  string
+	tbankSuccessURL       string
+	tbankFailURL          string
+	httpClient            *http.Client
 }
 
-func NewService(db *pgxpool.Pool) *Service {
-	return &Service{db: db}
+func NewService(db *pgxpool.Pool, cfg ...platformconfig.Config) *Service {
+	c := platformconfig.Config{}
+	if len(cfg) > 0 {
+		c = cfg[0]
+	}
+	apiBaseURL := strings.TrimRight(strings.TrimSpace(c.TBankAPIBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = "https://securepay.tinkoff.ru"
+	}
+	notificationPath := strings.TrimSpace(c.TBankNotificationPath)
+	if notificationPath == "" {
+		notificationPath = "/api/v1/billing/tbank/notifications"
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
+	notificationURL := ""
+	if baseURL != "" {
+		if strings.HasPrefix(notificationPath, "/") {
+			notificationURL = baseURL + notificationPath
+		} else {
+			notificationURL = baseURL + "/" + notificationPath
+		}
+	}
+	successURL := strings.TrimSpace(c.TBankSuccessURL)
+	if successURL == "" && baseURL != "" {
+		successURL = baseURL + "/parent"
+	}
+	failURL := strings.TrimSpace(c.TBankFailURL)
+	if failURL == "" && baseURL != "" {
+		failURL = baseURL + "/parent"
+	}
+
+	return &Service{
+		db:                   db,
+		tbankTerminalKey:     strings.TrimSpace(c.TBankTerminalKey),
+		tbankPassword:        strings.TrimSpace(c.TBankPassword),
+		tbankAPIBaseURL:      apiBaseURL,
+		tbankNotificationURL: notificationURL,
+		tbankSuccessURL:      successURL,
+		tbankFailURL:         failURL,
+		httpClient:           &http.Client{Timeout: 15 * time.Second},
+	}
 }
 
 type OfferInput struct {
@@ -277,15 +325,15 @@ func (s *Service) ListPurchaseRequests(ctx context.Context) (map[string]any, err
 				"account_id":   studentID,
 				"display_name": displayName,
 			},
-			"offer": map[string]any{
-				"offer_id": offerID,
-				"title":    title,
-			},
-			"target_type": targetType,
-			"status":     status,
-			"created_at": createdAt,
-		})
-	}
+				"offer": map[string]any{
+					"offer_id": offerID,
+					"title":    title,
+				},
+				"target_type": targetType,
+				"status":      status,
+				"created_at":  createdAt,
+			})
+		}
 	return map[string]any{"items": items}, rows.Err()
 }
 
@@ -327,6 +375,8 @@ func (s *Service) ListOrders(ctx context.Context, status string, studentID strin
 		       co.id::text,
 		       co.title,
 		       o.target_type,
+		       o.target_course_id::text,
+		       o.target_lesson_id,
 		       o.status,
 		       o.price_snapshot_amount_minor,
 		       o.price_snapshot_currency,
@@ -346,10 +396,10 @@ func (s *Service) ListOrders(ctx context.Context, status string, studentID strin
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var orderID, accountID, displayName, offerID, title, targetType, orderStatus, currency, createdAt string
-		var fulfilledAt *string
+		var orderID, accountID, displayName, offerID, title, targetType, targetCourseID, orderStatus, currency, createdAt string
+		var targetLessonID, fulfilledAt *string
 		var amount int64
-		if err := rows.Scan(&orderID, &accountID, &displayName, &offerID, &title, &targetType, &orderStatus, &amount, &currency, &createdAt, &fulfilledAt); err != nil {
+		if err := rows.Scan(&orderID, &accountID, &displayName, &offerID, &title, &targetType, &targetCourseID, &targetLessonID, &orderStatus, &amount, &currency, &createdAt, &fulfilledAt); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
@@ -363,6 +413,8 @@ func (s *Service) ListOrders(ctx context.Context, status string, studentID strin
 				"title":    title,
 			},
 			"target_type":        targetType,
+			"target_course_id":   targetCourseID,
+			"target_lesson_id":   targetLessonID,
 			"status":             orderStatus,
 			"price_amount_minor": amount,
 			"currency":           currency,
@@ -874,4 +926,9 @@ var (
 	ErrEntitlementNotFound            = fmt.Errorf("entitlement_not_found")
 	ErrEntitlementAlreadyResolved     = fmt.Errorf("entitlement_already_resolved")
 	ErrInvalidStudentID               = fmt.Errorf("invalid_student_id")
+	ErrChildNotVisible                = fmt.Errorf("child_not_visible")
+	ErrBillingNotConfigured           = fmt.Errorf("billing_not_configured")
+	ErrBillingProviderRejected        = fmt.Errorf("billing_provider_rejected")
+	ErrInvalidBillingNotification     = fmt.Errorf("invalid_billing_notification")
+	ErrBillingAmountMismatch          = fmt.Errorf("billing_amount_mismatch")
 )

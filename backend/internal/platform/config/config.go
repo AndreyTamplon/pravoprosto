@@ -32,6 +32,12 @@ type Config struct {
 	YandexAuthURL         string
 	YandexTokenURL        string
 	YandexUserInfoURL     string
+	TBankTerminalKey      string
+	TBankPassword         string
+	TBankAPIBaseURL       string
+	TBankNotificationPath string
+	TBankSuccessURL       string
+	TBankFailURL          string
 	HeartsMax             int
 	HeartsRestorePeriod   time.Duration
 	MaxRequestBodyBytes   int64
@@ -62,6 +68,12 @@ func Load() Config {
 		YandexAuthURL:         getEnv("PRAVO_YANDEX_AUTH_URL", ""),
 		YandexTokenURL:        getEnv("PRAVO_YANDEX_TOKEN_URL", ""),
 		YandexUserInfoURL:     getEnv("PRAVO_YANDEX_USERINFO_URL", ""),
+		TBankTerminalKey:      getEnv("PRAVO_TBANK_TERMINAL_KEY", ""),
+		TBankPassword:         getEnv("PRAVO_TBANK_PASSWORD", ""),
+		TBankAPIBaseURL:       getEnv("PRAVO_TBANK_API_BASE_URL", "https://securepay.tinkoff.ru"),
+		TBankNotificationPath: getEnv("PRAVO_TBANK_NOTIFICATION_PATH", "/api/v1/billing/tbank/notifications"),
+		TBankSuccessURL:       getEnv("PRAVO_TBANK_SUCCESS_URL", ""),
+		TBankFailURL:          getEnv("PRAVO_TBANK_FAIL_URL", ""),
 		HeartsMax:             getEnvInt("PRAVO_HEARTS_MAX", 5),
 		HeartsRestorePeriod:   time.Duration(getEnvInt("PRAVO_HEARTS_RESTORE_MINUTES", 30)) * time.Minute,
 		MaxRequestBodyBytes:   int64(getEnvInt("PRAVO_MAX_REQUEST_BODY_BYTES", 1<<20)),

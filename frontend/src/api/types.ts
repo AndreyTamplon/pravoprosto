@@ -246,6 +246,29 @@ export interface ChildCourseProgress {
   last_activity_at: string;
 }
 
+export interface ParentPaidOffer {
+  offer_id: string;
+  title: string;
+  description: string;
+  target_type: 'course' | 'lesson';
+  target_course_id: string;
+  target_lesson_id?: string;
+  course_title?: string;
+  lesson_title?: string;
+  price_amount_minor: number;
+  price_currency: string;
+  access_state: 'locked_paid' | 'awaiting_payment_confirmation' | 'granted';
+  order_id?: string;
+  payment_url?: string;
+}
+
+export interface ParentCheckoutResponse {
+  order_id: string;
+  access_state: 'awaiting_payment_confirmation';
+  payment_url: string;
+  payment_id?: string;
+}
+
 export interface LinkInvite {
   invite_id: string;
   status: 'active' | 'claimed' | 'expired' | 'revoked';

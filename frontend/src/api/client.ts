@@ -307,6 +307,10 @@ export const getChildProgress = async (studentId: string): Promise<import('./typ
     courses,
   };
 };
+export const getParentPaidOffers = (studentId: string) =>
+  getList<import('./types').ParentPaidOffer>(`/parent/children/${studentId}/commerce/offers`);
+export const startParentCheckout = (studentId: string, offerId: string) =>
+  post<import('./types').ParentCheckoutResponse>(`/parent/children/${studentId}/commerce/offers/${offerId}/checkout`, {});
 export const getParentProfile = () => get<import('./types').ParentProfile>('/parent/profile');
 export const updateParentProfile = (data: { display_name: string }) => put<import('./types').ParentProfile>('/parent/profile', data);
 
@@ -471,7 +475,23 @@ export const approveReview = (reviewId: string, comment?: string) => post<void>(
 export const rejectReview = (reviewId: string, comment: string) => post<void>(`/admin/moderation/reviews/${reviewId}/reject`, { comment });
 
 // Commerce (admin)
-export const getOffers = () => getList<import('./types').CommercialOffer>('/admin/commerce/offers');
+export const getOffers = async (): Promise<import('./types').CommercialOffer[]> => {
+  const items = await getList<Record<string, unknown>>('/admin/commerce/offers');
+  return items.map(o => ({
+    offer_id: (o.offer_id ?? '') as string,
+    target_type: (o.target_type ?? 'course') as 'course' | 'lesson',
+    target_course_id: (o.target_course_id ?? '') as string,
+    target_lesson_id: (o.target_lesson_id ?? undefined) as string | undefined,
+    course_title: (o.course_title ?? undefined) as string | undefined,
+    lesson_title: (o.lesson_title ?? undefined) as string | undefined,
+    title: (o.title ?? '') as string,
+    description: (o.description ?? '') as string,
+    price_amount_minor: Number(o.price_amount_minor ?? 0),
+    price_currency: (o.price_currency ?? o.currency ?? 'RUB') as string,
+    status: (o.status ?? 'draft') as 'draft' | 'active' | 'archived',
+    created_at: (o.created_at ?? new Date().toISOString()) as string,
+  }));
+};
 export const createOffer = (data: Record<string, unknown>) => post<{ offer_id: string }>('/admin/commerce/offers', data);
 export const updateOffer = (offerId: string, data: Record<string, unknown>) => put<void>(`/admin/commerce/offers/${offerId}`, data);
 export const getPurchaseRequests = async (): Promise<import('./types').PurchaseRequest[]> => {
@@ -504,7 +524,7 @@ export const getOrders = async (): Promise<import('./types').CommercialOrder[]> 
       offer_title: (offer.title ?? o.offer_title ?? '') as string,
       target_type: (o.target_type ?? '') as string,
       status: (o.status ?? 'awaiting_confirmation') as 'awaiting_confirmation' | 'fulfilled' | 'canceled',
-      price_amount_minor: (o.price_amount_minor ?? 0) as number,
+      price_amount_minor: Number(o.price_amount_minor ?? 0),
       price_currency: (o.price_currency ?? o.currency ?? 'RUB') as string,
       created_at: (o.created_at ?? '') as string,
       fulfilled_at: (o.fulfilled_at as string) ?? undefined,

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getChildProgress } from '../../api/client';
-import type { ChildProgress as ChildProgressType, ChildCourseProgress } from '../../api/types';
+import { getChildProgress, getParentPaidOffers, startParentCheckout } from '../../api/client';
+import type { ChildProgress as ChildProgressType, ChildCourseProgress, ParentPaidOffer } from '../../api/types';
 import { Button, ComicPanel, Badge, ProgressBar, Spinner } from '../../components/ui';
-import { timeAgo } from '../../utils/format';
+import { formatPrice, timeAgo } from '../../utils/format';
 import s from './ChildProgress.module.css';
 
 const statusMap: Record<string, { label: string; color: 'teal' | 'orange' | 'lime' | 'gray' }> = {
@@ -20,11 +20,43 @@ export default function ChildProgress() {
     () => getChildProgress(studentId!),
     [studentId],
   );
+  const {
+    data: paidOffers,
+    loading: loadingPaidOffers,
+    error: paidOffersError,
+    reload: reloadPaidOffers,
+  } = useApi<ParentPaidOffer[]>(
+    () => getParentPaidOffers(studentId!),
+    [studentId],
+  );
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [payingOfferID, setPayingOfferID] = useState<string | null>(null);
+  const [payError, setPayError] = useState<string | null>(null);
 
   const toggle = (courseId: string) =>
     setExpanded(prev => ({ ...prev, [courseId]: !prev[courseId] }));
+
+  const handlePayOffer = async (offer: ParentPaidOffer) => {
+    if (!studentId) return;
+    setPayingOfferID(offer.offer_id);
+    setPayError(null);
+    try {
+      let paymentURL = offer.payment_url;
+      if (!paymentURL) {
+        const checkout = await startParentCheckout(studentId, offer.offer_id);
+        paymentURL = checkout.payment_url;
+      }
+      await reloadPaidOffers();
+      if (paymentURL) {
+        window.location.href = paymentURL;
+      }
+    } catch (err: unknown) {
+      setPayError(err instanceof Error ? err.message : 'Не удалось начать оплату');
+    } finally {
+      setPayingOfferID(null);
+    }
+  };
 
   if (loading) return <Spinner text="Загрузка прогресса..." />;
   if (error) return <div className={s.error}>{error}</div>;
@@ -125,6 +157,60 @@ export default function ChildProgress() {
               </ComicPanel>
             );
           })}
+        </div>
+      )}
+
+      <h2 className={s.sectionTitle} style={{ marginTop: 28 }}>Платные уроки</h2>
+      {loadingPaidOffers && <Spinner text="Загрузка офферов..." />}
+      {paidOffersError && <div className={s.error}>{paidOffersError}</div>}
+      {payError && <div className={s.error}>{payError}</div>}
+      {!loadingPaidOffers && !paidOffersError && (!paidOffers || paidOffers.length === 0) && (
+        <ComicPanel>
+          <p style={{ textAlign: 'center', color: 'var(--dark-light)', padding: 20 }}>
+            Сейчас нет активных платных уроков
+          </p>
+        </ComicPanel>
+      )}
+      {paidOffers && paidOffers.length > 0 && (
+        <div className={s.paywallList}>
+          {paidOffers.map((offer) => (
+            <ComicPanel key={offer.offer_id}>
+              <div className={s.paywallRow}>
+                <div>
+                  <div className={s.paywallTitle}>{offer.title}</div>
+                  <div className={s.paywallMeta}>
+                    {offer.course_title ?? 'Курс платформы'}
+                    {offer.lesson_title ? ` / ${offer.lesson_title}` : ''}
+                  </div>
+                  <div className={s.paywallPrice}>{formatPrice(offer.price_amount_minor, offer.price_currency)}</div>
+                </div>
+                <div className={s.paywallActions}>
+                  {offer.access_state === 'granted' && <Badge color="lime">Оплачено</Badge>}
+                  {offer.access_state === 'awaiting_payment_confirmation' && (
+                    <>
+                      <Badge color="orange">Ожидает подтверждения</Badge>
+                      <Button
+                        size="sm"
+                        onClick={() => handlePayOffer(offer)}
+                        loading={payingOfferID === offer.offer_id}
+                      >
+                        {offer.payment_url ? 'Продолжить оплату' : 'Оплатить'}
+                      </Button>
+                    </>
+                  )}
+                  {offer.access_state === 'locked_paid' && (
+                    <Button
+                      size="sm"
+                      onClick={() => handlePayOffer(offer)}
+                      loading={payingOfferID === offer.offer_id}
+                    >
+                      Оплатить
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </ComicPanel>
+          ))}
         </div>
       )}
     </div>

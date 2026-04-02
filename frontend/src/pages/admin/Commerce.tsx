@@ -638,7 +638,6 @@ function EntitlementsTab() {
         student_id: grantStudentId.trim(),
         target_type: grantTargetType,
         target_course_id: grantCourseId,
-        source: 'complimentary',
       };
       if (grantTargetType === 'lesson' && grantLessonId) {
         body.target_lesson_id = grantLessonId;

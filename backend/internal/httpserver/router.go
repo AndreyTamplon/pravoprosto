@@ -110,7 +110,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		deps.TeacherAccess = teacheraccess.NewService(deps.DB.Pool(), deps.Config, platformlogging.Named(baseLogger, "teacheraccess"))
 	}
 	if deps.Commerce == nil {
-		deps.Commerce = commerce.NewService(deps.DB.Pool())
+		deps.Commerce = commerce.NewService(deps.DB.Pool(), deps.Config)
 	}
 
 	router.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -133,6 +133,26 @@ func NewRouter(deps Dependencies) http.Handler {
 				return
 			}
 			writeJSON(w, http.StatusOK, view)
+		})
+		r.Post("/billing/tbank/notifications", func(w http.ResponseWriter, r *http.Request) {
+			payload, err := commerce.DecodeTBankNotification(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+				return
+			}
+			if err := deps.Commerce.ProcessTBankNotification(r.Context(), payload); err != nil {
+				switch err {
+				case commerce.ErrBillingNotConfigured:
+					writeError(w, http.StatusServiceUnavailable, "billing_not_configured", "Billing provider is not configured", nil)
+				case commerce.ErrInvalidBillingNotification:
+					writeError(w, http.StatusForbidden, "invalid_billing_notification", "Invalid billing notification", nil)
+				default:
+					writeInternalError(w)
+				}
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
 		})
 
 		r.Post("/auth/logout", requireAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -605,6 +625,44 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusOK, view)
 			}))
+			pr.Get("/children/{studentID}/commerce/offers", requireRole("parent", deps, func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				view, err := deps.Commerce.ListParentChildOffers(r.Context(), session.AccountID, chi.URLParam(r, "studentID"))
+				if err != nil {
+					switch err {
+					case commerce.ErrChildNotVisible:
+						writeError(w, http.StatusForbidden, "forbidden", "Forbidden", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}))
+			pr.Post("/children/{studentID}/commerce/offers/{offerID}/checkout", requireRole("parent", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				view, err := deps.Commerce.StartParentCheckout(r.Context(), session.AccountID, chi.URLParam(r, "studentID"), chi.URLParam(r, "offerID"))
+				if err != nil {
+					switch err {
+					case commerce.ErrChildNotVisible:
+						writeError(w, http.StatusForbidden, "forbidden", "Forbidden", nil)
+					case commerce.ErrOfferNotFound:
+						writeError(w, http.StatusNotFound, "offer_not_found", "Offer not found", nil)
+					case commerce.ErrOfferNotActive:
+						writeError(w, http.StatusConflict, "offer_not_active", "Offer not active", nil)
+					case commerce.ErrEntitlementAlreadyActive:
+						writeError(w, http.StatusConflict, "entitlement_already_active", "Entitlement already active", nil)
+					case commerce.ErrBillingNotConfigured:
+						writeError(w, http.StatusServiceUnavailable, "billing_not_configured", "Billing provider is not configured", nil)
+					case commerce.ErrBillingProviderRejected:
+						writeError(w, http.StatusBadGateway, "billing_provider_rejected", "Billing provider rejected operation", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusCreated, view)
+			}, deps)))
 			pr.Get("/profile", requireRole("parent", deps, basicProfileGetHandler("parent", deps)))
 			pr.Put("/profile", requireRole("parent", deps, requireCSRF(basicProfilePutHandler("parent", deps), deps)))
 		})

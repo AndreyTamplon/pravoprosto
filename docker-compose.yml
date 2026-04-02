@@ -38,6 +38,12 @@ services:
       PRAVO_YANDEX_AUTH_URL: https://oauth.yandex.ru/authorize
       PRAVO_YANDEX_TOKEN_URL: https://oauth.yandex.ru/token
       PRAVO_YANDEX_USERINFO_URL: https://login.yandex.ru/info
+      PRAVO_TBANK_TERMINAL_KEY: ${TBANK_TERMINAL_KEY}
+      PRAVO_TBANK_PASSWORD: ${TBANK_PASSWORD}
+      PRAVO_TBANK_API_BASE_URL: ${TBANK_API_BASE_URL}
+      PRAVO_TBANK_NOTIFICATION_PATH: ${TBANK_NOTIFICATION_PATH}
+      PRAVO_TBANK_SUCCESS_URL: ${TBANK_SUCCESS_URL}
+      PRAVO_TBANK_FAIL_URL: ${TBANK_FAIL_URL}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s

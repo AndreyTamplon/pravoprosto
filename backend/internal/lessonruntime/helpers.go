@@ -272,6 +272,7 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 	}
 
 	var offerID, offerTargetType, title, priceCurrency string
+	var hasOpenRequest bool
 	var priceAmountMinor int64
 	var hasOpenRequest bool
 	if err := db.QueryRow(ctx, `
@@ -286,13 +287,18 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 		return "", nil, nil, err
 	}
 	err = db.QueryRow(ctx, `
-		select id::text, target_type, title, price_amount_minor, price_currency
-		from commercial_offers
-		where status = 'active' and target_course_id = $1
-		  and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $2))
-		order by case when target_type = 'lesson' then 0 else 1 end
+		select o.id::text, o.target_type, o.title, o.price_amount_minor, o.price_currency,
+		       exists(
+		           select 1
+		           from purchase_requests pr
+		           where pr.offer_id = o.id and pr.student_id = $3 and pr.status = 'open'
+		       ) as has_open_request
+		from commercial_offers o
+		where o.status = 'active' and o.target_course_id = $1
+		  and (o.target_type = 'course' or (o.target_type = 'lesson' and o.target_lesson_id = $2))
+		order by case when o.target_type = 'lesson' then 0 else 1 end
 		limit 1
-	`, courseID, lessonID).Scan(&offerID, &offerTargetType, &title, &priceAmountMinor, &priceCurrency)
+	`, courseID, lessonID, studentID).Scan(&offerID, &offerTargetType, &title, &priceAmountMinor, &priceCurrency, &hasOpenRequest)
 	if err == nil {
 		return "locked_paid", map[string]any{
 			"offer_id":           offerID,
