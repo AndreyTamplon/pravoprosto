@@ -274,18 +274,6 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 	var offerID, offerTargetType, title, priceCurrency string
 	var hasOpenRequest bool
 	var priceAmountMinor int64
-	var hasOpenRequest bool
-	if err := db.QueryRow(ctx, `
-		select exists(
-		    select 1
-		    from purchase_requests pr
-		    join commercial_offers o on o.id = pr.offer_id
-		    where pr.student_id = $1 and pr.status = 'open' and o.target_course_id = $2
-		      and (o.target_type = 'course' or (o.target_type = 'lesson' and o.target_lesson_id = $3))
-		)
-	`, studentID, courseID, lessonID).Scan(&hasOpenRequest); err != nil {
-		return "", nil, nil, err
-	}
 	err = db.QueryRow(ctx, `
 		select o.id::text, o.target_type, o.title, o.price_amount_minor, o.price_currency,
 		       exists(
