@@ -252,14 +252,20 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 	}
 
 	var orderID, orderTargetType string
+	pendingTTL := s.config.TBankPendingTTL
+	if pendingTTL <= 0 {
+		pendingTTL = 60 * time.Minute
+	}
+	pendingCutoff := time.Now().UTC().Add(-pendingTTL)
 	err = db.QueryRow(ctx, `
 		select id::text, target_type
 		from commercial_orders
 		where student_id = $1 and status = 'awaiting_confirmation' and target_course_id = $2
 		  and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))
+		  and created_at >= $4
 		order by case when target_type = 'lesson' then 0 else 1 end
 		limit 1
-	`, studentID, courseID, lessonID).Scan(&orderID, &orderTargetType)
+	`, studentID, courseID, lessonID, pendingCutoff).Scan(&orderID, &orderTargetType)
 	if err == nil {
 		return "awaiting_payment_confirmation", nil, map[string]any{
 			"order_id":    orderID,
