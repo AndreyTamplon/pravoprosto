@@ -20,16 +20,34 @@ import (
 )
 
 type tbankInitPayload struct {
-	TerminalKey    string `json:"TerminalKey"`
-	Amount         int64  `json:"Amount"`
-	OrderID        string `json:"OrderId"`
-	Description    string `json:"Description,omitempty"`
-	NotificationURL string `json:"NotificationURL,omitempty"`
-	SuccessURL     string `json:"SuccessURL,omitempty"`
-	FailURL        string `json:"FailURL,omitempty"`
-	PayType        string `json:"PayType,omitempty"`
-	Data           map[string]string `json:"DATA,omitempty"`
-	Token          string `json:"Token"`
+	TerminalKey     string            `json:"TerminalKey"`
+	Amount          int64             `json:"Amount"`
+	OrderID         string            `json:"OrderId"`
+	Description     string            `json:"Description,omitempty"`
+	NotificationURL string            `json:"NotificationURL,omitempty"`
+	SuccessURL      string            `json:"SuccessURL,omitempty"`
+	FailURL         string            `json:"FailURL,omitempty"`
+	RedirectDueDate string            `json:"RedirectDueDate,omitempty"`
+	PayType         string            `json:"PayType,omitempty"`
+	Data            map[string]string `json:"DATA,omitempty"`
+	Receipt         *tbankReceipt     `json:"Receipt,omitempty"`
+	Token           string            `json:"Token"`
+}
+
+type tbankReceipt struct {
+	Email    string             `json:"Email,omitempty"`
+	Taxation string             `json:"Taxation,omitempty"`
+	Items    []tbankReceiptItem `json:"Items,omitempty"`
+}
+
+type tbankReceiptItem struct {
+	Name          string  `json:"Name"`
+	Price         int64   `json:"Price"`
+	Quantity      float64 `json:"Quantity"`
+	Amount        int64   `json:"Amount"`
+	PaymentMethod string  `json:"PaymentMethod,omitempty"`
+	PaymentObject string  `json:"PaymentObject,omitempty"`
+	Tax           string  `json:"Tax,omitempty"`
 }
 
 type tbankInitResponse struct {
@@ -57,6 +75,10 @@ func (s *Service) ListParentChildOffers(ctx context.Context, parentID string, st
 	if err := s.ensureParentChildLink(ctx, parentID, studentID); err != nil {
 		return nil, err
 	}
+	if err := s.cancelExpiredAwaitingOrders(ctx, studentID); err != nil {
+		return nil, err
+	}
+	pendingCutoff := s.pendingOrderCutoff()
 
 	rows, err := s.db.Query(ctx, `
 		select o.id::text, o.title, o.description, o.target_type, o.target_course_id::text, o.target_lesson_id,
@@ -71,10 +93,11 @@ func (s *Service) ListParentChildOffers(ctx context.Context, parentID string, st
 		left join commercial_orders ord
 		       on ord.student_id = $1 and ord.status = 'awaiting_confirmation' and ord.target_course_id = o.target_course_id
 		      and (ord.target_type = 'course' or (ord.target_type = 'lesson' and ord.target_lesson_id = o.target_lesson_id))
+		      and ord.created_at >= $2
 		left join tbank_payment_sessions tps on tps.order_id = ord.id
 		where o.status = 'active'
 		order by o.created_at desc
-	`, studentID)
+	`, studentID, pendingCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +165,9 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	if err := s.cancelExpiredAwaitingOrdersTx(ctx, tx, studentID); err != nil {
+		return nil, err
+	}
 
 	var offer struct {
 		ID               string
@@ -215,6 +241,16 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 	`, studentID, offer.ID, parentID); err != nil {
 		return nil, err
 	}
+	payerEmail := ""
+	if err := tx.QueryRow(ctx, `
+		select email
+		from external_identities
+		where account_id = $1 and email is not null and trim(email) <> ''
+		order by updated_at desc
+		limit 1
+	`, parentID).Scan(&payerEmail); err != nil && err != pgx.ErrNoRows {
+		return nil, err
+	}
 
 	if existingOrder {
 		var paymentURL *string
@@ -281,7 +317,7 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 		return nil, err
 	}
 
-	initResp, initReqJSON, initRespJSON, err := s.initTBankPayment(ctx, orderID, offer.PriceAmountMinor, offer.Title)
+	initResp, initReqJSON, initRespJSON, err := s.initTBankPayment(ctx, orderID, offer.PriceAmountMinor, offer.Title, payerEmail)
 	if err != nil {
 		_, _ = s.db.Exec(ctx, `
 			update tbank_payment_sessions
@@ -437,7 +473,18 @@ func (s *Service) ProcessTBankNotification(ctx context.Context, payload map[stri
 		return tx.Commit(ctx)
 	}
 
-	if order.Status != "awaiting_confirmation" && order.Status != "fulfilled" {
+	if order.Status == "fulfilled" {
+		if _, err := tx.Exec(ctx, `
+			update tbank_payment_sessions
+			set status = 'paid', paid_at = coalesce(paid_at, now()), updated_at = now(), last_notification_json = $2
+			where order_id = $1
+		`, order.ID, notificationJSON); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	if order.Status != "awaiting_confirmation" {
 		return tx.Commit(ctx)
 	}
 
@@ -524,7 +571,7 @@ func (s *Service) ProcessTBankNotification(ctx context.Context, payload map[stri
 	return tx.Commit(ctx)
 }
 
-func (s *Service) initTBankPayment(ctx context.Context, orderID string, amountMinor int64, description string) (tbankInitResponse, []byte, []byte, error) {
+func (s *Service) initTBankPayment(ctx context.Context, orderID string, amountMinor int64, description string, payerEmail string) (tbankInitResponse, []byte, []byte, error) {
 	payload := tbankInitPayload{
 		TerminalKey: s.tbankTerminalKey,
 		Amount:      amountMinor,
@@ -544,15 +591,22 @@ func (s *Service) initTBankPayment(ctx context.Context, orderID string, amountMi
 	if s.tbankFailURL != "" {
 		payload.FailURL = s.tbankFailURL
 	}
+	if dueDate := s.tbankRedirectDueDate(); dueDate != "" {
+		payload.RedirectDueDate = dueDate
+	}
+	if receipt := s.buildTBankReceipt(description, amountMinor, payerEmail); receipt != nil {
+		payload.Receipt = receipt
+	}
 	payload.Token = s.signTBankValues(map[string]string{
-		"TerminalKey":    payload.TerminalKey,
-		"Amount":         strconv.FormatInt(payload.Amount, 10),
-		"OrderId":        payload.OrderID,
-		"Description":    payload.Description,
+		"TerminalKey":     payload.TerminalKey,
+		"Amount":          strconv.FormatInt(payload.Amount, 10),
+		"OrderId":         payload.OrderID,
+		"Description":     payload.Description,
 		"NotificationURL": payload.NotificationURL,
-		"SuccessURL":     payload.SuccessURL,
-		"FailURL":        payload.FailURL,
-		"PayType":        payload.PayType,
+		"SuccessURL":      payload.SuccessURL,
+		"FailURL":         payload.FailURL,
+		"RedirectDueDate": payload.RedirectDueDate,
+		"PayType":         payload.PayType,
 	})
 
 	initReqJSON := mustJSON(payload)
@@ -602,6 +656,87 @@ func (s *Service) initTBankPayment(ctx context.Context, orderID string, amountMi
 		return tbankInitResponse{}, initReqJSON, respBody, ErrBillingProviderRejected
 	}
 	return parsed, initReqJSON, respBody, nil
+}
+
+func (s *Service) pendingOrderCutoff() time.Time {
+	if s.tbankPendingTTL <= 0 {
+		return time.Unix(0, 0).UTC()
+	}
+	return time.Now().UTC().Add(-s.tbankPendingTTL)
+}
+
+func (s *Service) cancelExpiredAwaitingOrders(ctx context.Context, studentID string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := s.cancelExpiredAwaitingOrdersTx(ctx, tx, studentID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Service) cancelExpiredAwaitingOrdersTx(ctx context.Context, tx pgx.Tx, studentID string) error {
+	if strings.TrimSpace(studentID) == "" || s.tbankPendingTTL <= 0 {
+		return nil
+	}
+	cutoff := s.pendingOrderCutoff()
+	if _, err := tx.Exec(ctx, `
+		with expired as (
+			update commercial_orders
+			set status = 'canceled', canceled_at = coalesce(canceled_at, now()), updated_at = now()
+			where student_id = $1
+			  and status = 'awaiting_confirmation'
+			  and created_at < $2
+			returning id
+		)
+		update tbank_payment_sessions tps
+		set status = 'canceled', updated_at = now()
+		from expired
+		where tps.order_id = expired.id
+		  and tps.status in ('created', 'initialized')
+	`, studentID, cutoff); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) tbankRedirectDueDate() string {
+	if s.tbankPendingTTL <= 0 {
+		return ""
+	}
+	return time.Now().UTC().Add(s.tbankPendingTTL).Format(time.RFC3339)
+}
+
+func (s *Service) buildTBankReceipt(description string, amountMinor int64, payerEmail string) *tbankReceipt {
+	if !s.tbankReceiptEnabled {
+		return nil
+	}
+	email := strings.TrimSpace(payerEmail)
+	taxation := strings.TrimSpace(s.tbankReceiptTaxation)
+	if email == "" || taxation == "" || amountMinor <= 0 {
+		return nil
+	}
+	itemName := strings.TrimSpace(description)
+	if itemName == "" {
+		itemName = "Scenario access"
+	}
+	return &tbankReceipt{
+		Email:    email,
+		Taxation: taxation,
+		Items: []tbankReceiptItem{
+			{
+				Name:          itemName,
+				Price:         amountMinor,
+				Quantity:      1,
+				Amount:        amountMinor,
+				PaymentMethod: s.tbankReceiptPaymentMethod,
+				PaymentObject: s.tbankReceiptPaymentObject,
+				Tax:           s.tbankReceiptTax,
+			},
+		},
+	}
 }
 
 func (s *Service) ensureParentChildLink(ctx context.Context, parentID string, studentID string) error {

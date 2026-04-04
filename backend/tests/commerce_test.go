@@ -2,10 +2,18 @@ package tests
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"pravoprost/backend/internal/testkit/app"
 	httpclient "pravoprost/backend/internal/testkit/http"
@@ -671,5 +679,338 @@ func TestCommerce_ManualConfirmStillWorksAfterOfferArchived(t *testing.T) {
 	}
 	if orderStatus != "fulfilled" || paymentCount != 1 || entitlementStatus != "active" {
 		t.Fatalf("unexpected archived-confirm final state order=%s payment_count=%d entitlement=%s", orderStatus, paymentCount, entitlementStatus)
+	}
+}
+
+func TestCommerce_ParentCheckoutAndTBankNotificationConfirm(t *testing.T) {
+	const (
+		terminalKey = "test-terminal"
+		password    = "test-password"
+		paymentID   = "777001"
+	)
+
+	fakeTBank := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v2/Init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		decoder.UseNumber()
+		var payload map[string]any
+		if err := decoder.Decode(&payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		if got := strings.TrimSpace(scalarToString(payload["TerminalKey"])); got != terminalKey {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if got := strings.TrimSpace(scalarToString(payload["PayType"])); got != "O" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		redirectDueDate := strings.TrimSpace(scalarToString(payload["RedirectDueDate"]))
+		if redirectDueDate == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if _, err := time.Parse(time.RFC3339, redirectDueDate); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		data, ok := payload["DATA"].(map[string]any)
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if got := strings.TrimSpace(scalarToString(data["OperationInitiatorType"])); got != "0" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		expectedToken := signTBankTokenFromPayload(payload, password)
+		if !strings.EqualFold(expectedToken, strings.TrimSpace(scalarToString(payload["Token"]))) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		orderID := strings.TrimSpace(scalarToString(payload["OrderId"]))
+		if orderID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"Success":    true,
+			"ErrorCode":  "0",
+			"PaymentId":  paymentID,
+			"OrderId":    orderID,
+			"Status":     "NEW",
+			"PaymentURL": "https://pay.test/checkout/" + orderID,
+		})
+	}))
+	defer fakeTBank.Close()
+
+	t.Setenv("PRAVO_TBANK_TERMINAL_KEY", terminalKey)
+	t.Setenv("PRAVO_TBANK_PASSWORD", password)
+	t.Setenv("PRAVO_TBANK_API_BASE_URL", fakeTBank.URL)
+	t.Setenv("PRAVO_TBANK_NOTIFICATION_PATH", "/api/payment/webhook")
+	t.Setenv("PRAVO_TBANK_SUCCESS_URL", "https://smartgoschool.ru/success")
+	t.Setenv("PRAVO_TBANK_FAIL_URL", "https://smartgoschool.ru/fail")
+	t.Setenv("PRAVO_TBANK_PENDING_TTL_MINUTES", "60")
+
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+	parentClient := httpclient.New(t)
+	parentCSRF, _ := loginAsRole(t, parentClient, testApp, "parent-commerce-online", "parent")
+	studentClient := httpclient.New(t)
+	studentCSRF, studentID := loginAsRole(t, studentClient, testApp, "student-commerce-online", "student")
+
+	guardianToken := createGuardianInvite(t, parentClient, testApp, parentCSRF)
+	claimResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/guardian-links/claim", map[string]string{"token": guardianToken}, studentCSRF)
+	defer claimResp.Body.Close()
+	if claimResp.StatusCode != http.StatusOK {
+		t.Fatalf("guardian claim status: %d", claimResp.StatusCode)
+	}
+
+	courseID, _ := publishPlatformCourse(t, adminClient, testApp, adminCSRF, "Parent Checkout Course", map[string]any{
+		"modules": []any{
+			map[string]any{
+				"id": "module_1",
+				"lessons": []any{
+					map[string]any{
+						"id":    "lesson_1",
+						"title": "Paid lesson",
+						"graph": map[string]any{
+							"startNodeId": "n1",
+							"nodes":       []any{map[string]any{"id": "n1", "kind": "end", "text": "Done"}},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	createOfferResp := performJSON(t, adminClient, http.MethodPost, testApp.Server.URL+"/api/v1/admin/commerce/offers", map[string]any{
+		"target_type":        "lesson",
+		"target_course_id":   courseID,
+		"target_lesson_id":   "lesson_1",
+		"title":              "Online parent offer",
+		"description":        "Premium",
+		"price_amount_minor": 12900,
+		"price_currency":     "RUB",
+	}, adminCSRF)
+	if createOfferResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create online offer status: %d", createOfferResp.StatusCode)
+	}
+	defer createOfferResp.Body.Close()
+	var createdOffer struct {
+		OfferID string `json:"offer_id"`
+	}
+	if err := json.NewDecoder(createOfferResp.Body).Decode(&createdOffer); err != nil {
+		t.Fatalf("decode online offer: %v", err)
+	}
+
+	activateOfferResp := performJSON(t, adminClient, http.MethodPut, testApp.Server.URL+"/api/v1/admin/commerce/offers/"+createdOffer.OfferID, map[string]any{
+		"title":              "Online parent offer",
+		"description":        "Premium",
+		"price_amount_minor": 12900,
+		"price_currency":     "RUB",
+		"status":             "active",
+	}, adminCSRF)
+	if activateOfferResp.StatusCode != http.StatusOK {
+		t.Fatalf("activate online offer status: %d", activateOfferResp.StatusCode)
+	}
+
+	offersResp, err := parentClient.Get(testApp.Server.URL + "/api/v1/parent/children/" + studentID + "/commerce/offers")
+	if err != nil {
+		t.Fatalf("list parent paid offers: %v", err)
+	}
+	if offersResp.StatusCode != http.StatusOK {
+		t.Fatalf("list parent paid offers status: %d", offersResp.StatusCode)
+	}
+	defer offersResp.Body.Close()
+	var offersView struct {
+		Items []struct {
+			OfferID     string `json:"offer_id"`
+			AccessState string `json:"access_state"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(offersResp.Body).Decode(&offersView); err != nil {
+		t.Fatalf("decode parent paid offers: %v", err)
+	}
+	if len(offersView.Items) == 0 || offersView.Items[0].OfferID != createdOffer.OfferID {
+		t.Fatalf("unexpected paid offers list: %+v", offersView.Items)
+	}
+	if offersView.Items[0].AccessState != "locked_paid" {
+		t.Fatalf("expected locked_paid before checkout, got %s", offersView.Items[0].AccessState)
+	}
+
+	checkoutResp := performJSON(t, parentClient, http.MethodPost, testApp.Server.URL+"/api/v1/parent/children/"+studentID+"/commerce/offers/"+createdOffer.OfferID+"/checkout", map[string]any{}, parentCSRF)
+	if checkoutResp.StatusCode != http.StatusCreated {
+		t.Fatalf("parent checkout status: %d", checkoutResp.StatusCode)
+	}
+	defer checkoutResp.Body.Close()
+	var checkout struct {
+		OrderID     string `json:"order_id"`
+		AccessState string `json:"access_state"`
+		PaymentURL  string `json:"payment_url"`
+		PaymentID   string `json:"payment_id"`
+	}
+	if err := json.NewDecoder(checkoutResp.Body).Decode(&checkout); err != nil {
+		t.Fatalf("decode checkout response: %v", err)
+	}
+	if checkout.OrderID == "" || checkout.PaymentURL == "" {
+		t.Fatalf("unexpected checkout payload: %+v", checkout)
+	}
+	if checkout.AccessState != "awaiting_payment_confirmation" {
+		t.Fatalf("unexpected checkout access_state: %s", checkout.AccessState)
+	}
+
+	tree := fetchStudentTree(t, studentClient, testApp, courseID)
+	if tree.Modules[0].Lessons[0].Access.AccessState != "awaiting_payment_confirmation" {
+		t.Fatalf("expected awaiting_payment_confirmation after checkout, got %s", tree.Modules[0].Lessons[0].Access.AccessState)
+	}
+
+	notification := map[string]any{
+		"TerminalKey": terminalKey,
+		"OrderId":     checkout.OrderID,
+		"PaymentId":   paymentID,
+		"Status":      "CONFIRMED",
+		"Success":     true,
+		"Amount":      12900,
+	}
+	notification["Token"] = signTBankTokenFromPayload(notification, password)
+
+	webhookResp := performJSON(t, parentClient, http.MethodPost, testApp.Server.URL+"/api/payment/webhook", notification, "")
+	defer webhookResp.Body.Close()
+	if webhookResp.StatusCode != http.StatusOK {
+		t.Fatalf("tbank notification status: %d", webhookResp.StatusCode)
+	}
+	body, _ := io.ReadAll(webhookResp.Body)
+	if strings.TrimSpace(string(body)) != "OK" {
+		t.Fatalf("unexpected notification body: %s", strings.TrimSpace(string(body)))
+	}
+
+	duplicateWebhookResp := performJSON(t, parentClient, http.MethodPost, testApp.Server.URL+"/api/v1/billing/tbank/notifications", notification, "")
+	defer duplicateWebhookResp.Body.Close()
+	if duplicateWebhookResp.StatusCode != http.StatusOK {
+		t.Fatalf("duplicate tbank notification status: %d", duplicateWebhookResp.StatusCode)
+	}
+
+	tree = fetchStudentTree(t, studentClient, testApp, courseID)
+	if tree.Modules[0].Lessons[0].Access.AccessState != "granted" {
+		t.Fatalf("expected granted after tbank confirm, got %s", tree.Modules[0].Lessons[0].Access.AccessState)
+	}
+
+	startResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+courseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
+	defer startResp.Body.Close()
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("start after tbank confirm status: %d", startResp.StatusCode)
+	}
+
+	var orderStatus, sessionStatus string
+	var paymentCount, entitlementCount int
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `select status from commercial_orders where id = $1`, checkout.OrderID).Scan(&orderStatus); err != nil {
+		t.Fatalf("query online order status: %v", err)
+	}
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `select status from tbank_payment_sessions where order_id = $1`, checkout.OrderID).Scan(&sessionStatus); err != nil {
+		t.Fatalf("query tbank session status: %v", err)
+	}
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `select count(*) from payment_records where order_id = $1`, checkout.OrderID).Scan(&paymentCount); err != nil {
+		t.Fatalf("count online payment records: %v", err)
+	}
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `select count(*) from entitlements where order_id = $1 and status = 'active'`, checkout.OrderID).Scan(&entitlementCount); err != nil {
+		t.Fatalf("count online entitlements: %v", err)
+	}
+	if orderStatus != "fulfilled" || sessionStatus != "paid" || paymentCount != 1 || entitlementCount != 1 {
+		t.Fatalf("unexpected final online billing state order=%s session=%s payments=%d entitlements=%d", orderStatus, sessionStatus, paymentCount, entitlementCount)
+	}
+}
+
+func TestCommerce_TBankNotificationRejectsInvalidToken(t *testing.T) {
+	const (
+		terminalKey = "test-terminal-invalid"
+		password    = "test-password-invalid"
+	)
+
+	t.Setenv("PRAVO_TBANK_TERMINAL_KEY", terminalKey)
+	t.Setenv("PRAVO_TBANK_PASSWORD", password)
+	t.Setenv("PRAVO_TBANK_API_BASE_URL", "https://securepay.tinkoff.ru")
+
+	testApp := app.New(t)
+	client := httpclient.New(t)
+
+	resp := performJSON(t, client, http.MethodPost, testApp.Server.URL+"/api/v1/billing/tbank/notifications", map[string]any{
+		"TerminalKey": terminalKey,
+		"OrderId":     "11111111-1111-1111-1111-111111111111",
+		"PaymentId":   "1",
+		"Status":      "CONFIRMED",
+		"Success":     true,
+		"Amount":      100,
+		"Token":       "bad-token",
+	}, "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("invalid tbank token notification status: %d", resp.StatusCode)
+	}
+}
+
+func signTBankTokenFromPayload(payload map[string]any, password string) string {
+	normalized := make(map[string]string, len(payload)+1)
+	for key, value := range payload {
+		if key == "Token" {
+			continue
+		}
+		switch value.(type) {
+		case map[string]any, []any:
+			continue
+		}
+		normalized[key] = scalarToString(value)
+	}
+	normalized["Password"] = password
+
+	keys := make([]string, 0, len(normalized))
+	for key := range normalized {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, key := range keys {
+		b.WriteString(normalized[key])
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+func scalarToString(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case json.Number:
+		return v.String()
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case float32:
+		return strconv.FormatInt(int64(v), 10)
+	default:
+		return fmt.Sprint(v)
 	}
 }

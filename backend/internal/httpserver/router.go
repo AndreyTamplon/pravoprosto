@@ -116,6 +116,28 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	tbankNotificationHandler := func(w http.ResponseWriter, r *http.Request) {
+		payload, err := commerce.DecodeTBankNotification(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+			return
+		}
+		if err := deps.Commerce.ProcessTBankNotification(r.Context(), payload); err != nil {
+			switch err {
+			case commerce.ErrBillingNotConfigured:
+				writeError(w, http.StatusServiceUnavailable, "billing_not_configured", "Billing provider is not configured", nil)
+			case commerce.ErrInvalidBillingNotification:
+				writeError(w, http.StatusForbidden, "invalid_billing_notification", "Invalid billing notification", nil)
+			default:
+				writeInternalError(w)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}
+	// Current provider callback endpoint.
+	router.Post("/api/payment/webhook", tbankNotificationHandler)
 
 	router.Route("/api/v1", func(r chi.Router) {
 		r.Get("/session", func(w http.ResponseWriter, r *http.Request) {
@@ -134,26 +156,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			}
 			writeJSON(w, http.StatusOK, view)
 		})
-		r.Post("/billing/tbank/notifications", func(w http.ResponseWriter, r *http.Request) {
-			payload, err := commerce.DecodeTBankNotification(r)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
-				return
-			}
-			if err := deps.Commerce.ProcessTBankNotification(r.Context(), payload); err != nil {
-				switch err {
-				case commerce.ErrBillingNotConfigured:
-					writeError(w, http.StatusServiceUnavailable, "billing_not_configured", "Billing provider is not configured", nil)
-				case commerce.ErrInvalidBillingNotification:
-					writeError(w, http.StatusForbidden, "invalid_billing_notification", "Invalid billing notification", nil)
-				default:
-					writeInternalError(w)
-				}
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("OK"))
-		})
+		// Legacy callback path kept for compatibility.
+		r.Post("/billing/tbank/notifications", tbankNotificationHandler)
 
 		r.Post("/auth/logout", requireAuth(func(w http.ResponseWriter, r *http.Request) {
 			session, _ := sessionFromContext(r.Context())

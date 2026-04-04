@@ -18,14 +18,20 @@ import (
 )
 
 type Service struct {
-	db                    *pgxpool.Pool
-	tbankTerminalKey      string
-	tbankPassword         string
-	tbankAPIBaseURL       string
-	tbankNotificationURL  string
-	tbankSuccessURL       string
-	tbankFailURL          string
-	httpClient            *http.Client
+	db                        *pgxpool.Pool
+	tbankTerminalKey          string
+	tbankPassword             string
+	tbankAPIBaseURL           string
+	tbankNotificationURL      string
+	tbankSuccessURL           string
+	tbankFailURL              string
+	tbankPendingTTL           time.Duration
+	tbankReceiptEnabled       bool
+	tbankReceiptTaxation      string
+	tbankReceiptTax           string
+	tbankReceiptPaymentMethod string
+	tbankReceiptPaymentObject string
+	httpClient                *http.Client
 }
 
 func NewService(db *pgxpool.Pool, cfg ...platformconfig.Config) *Service {
@@ -39,7 +45,7 @@ func NewService(db *pgxpool.Pool, cfg ...platformconfig.Config) *Service {
 	}
 	notificationPath := strings.TrimSpace(c.TBankNotificationPath)
 	if notificationPath == "" {
-		notificationPath = "/api/v1/billing/tbank/notifications"
+		notificationPath = "/api/payment/webhook"
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	notificationURL := ""
@@ -58,16 +64,38 @@ func NewService(db *pgxpool.Pool, cfg ...platformconfig.Config) *Service {
 	if failURL == "" && baseURL != "" {
 		failURL = baseURL + "/parent"
 	}
+	pendingTTL := c.TBankPendingTTL
+	if pendingTTL <= 0 {
+		pendingTTL = 60 * time.Minute
+	}
+	receiptPaymentMethod := strings.TrimSpace(c.TBankReceiptPaymentMethod)
+	if receiptPaymentMethod == "" {
+		receiptPaymentMethod = "full_payment"
+	}
+	receiptPaymentObject := strings.TrimSpace(c.TBankReceiptPaymentObject)
+	if receiptPaymentObject == "" {
+		receiptPaymentObject = "service"
+	}
+	receiptTax := strings.TrimSpace(c.TBankReceiptTax)
+	if receiptTax == "" {
+		receiptTax = "none"
+	}
 
 	return &Service{
-		db:                   db,
-		tbankTerminalKey:     strings.TrimSpace(c.TBankTerminalKey),
-		tbankPassword:        strings.TrimSpace(c.TBankPassword),
-		tbankAPIBaseURL:      apiBaseURL,
-		tbankNotificationURL: notificationURL,
-		tbankSuccessURL:      successURL,
-		tbankFailURL:         failURL,
-		httpClient:           &http.Client{Timeout: 15 * time.Second},
+		db:                        db,
+		tbankTerminalKey:          strings.TrimSpace(c.TBankTerminalKey),
+		tbankPassword:             strings.TrimSpace(c.TBankPassword),
+		tbankAPIBaseURL:           apiBaseURL,
+		tbankNotificationURL:      notificationURL,
+		tbankSuccessURL:           successURL,
+		tbankFailURL:              failURL,
+		tbankPendingTTL:           pendingTTL,
+		tbankReceiptEnabled:       c.TBankReceiptEnabled,
+		tbankReceiptTaxation:      strings.TrimSpace(c.TBankReceiptTaxation),
+		tbankReceiptTax:           receiptTax,
+		tbankReceiptPaymentMethod: receiptPaymentMethod,
+		tbankReceiptPaymentObject: receiptPaymentObject,
+		httpClient:                &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -325,15 +353,15 @@ func (s *Service) ListPurchaseRequests(ctx context.Context) (map[string]any, err
 				"account_id":   studentID,
 				"display_name": displayName,
 			},
-				"offer": map[string]any{
-					"offer_id": offerID,
-					"title":    title,
-				},
-				"target_type": targetType,
-				"status":      status,
-				"created_at":  createdAt,
-			})
-		}
+			"offer": map[string]any{
+				"offer_id": offerID,
+				"title":    title,
+			},
+			"target_type": targetType,
+			"status":      status,
+			"created_at":  createdAt,
+		})
+	}
 	return map[string]any{"items": items}, rows.Err()
 }
 
