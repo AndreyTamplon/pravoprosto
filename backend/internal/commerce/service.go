@@ -223,6 +223,9 @@ func (s *Service) ListOffers(ctx context.Context) (map[string]any, error) {
 }
 
 func (s *Service) CreateOffer(ctx context.Context, adminID string, input OfferInput) (map[string]any, error) {
+	if input.PriceAmountMinor <= 0 {
+		return nil, ErrInvalidPrice
+	}
 	targetLessonID, err := normalizeTarget(input.TargetType, input.TargetCourseID, input.TargetLessonID)
 	if err != nil {
 		return nil, err
@@ -247,6 +250,9 @@ func (s *Service) CreateOffer(ctx context.Context, adminID string, input OfferIn
 }
 
 func (s *Service) UpdateOffer(ctx context.Context, offerID string, input UpdateOfferInput) (map[string]any, error) {
+	if input.PriceAmountMinor <= 0 {
+		return nil, ErrInvalidPrice
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -938,6 +944,7 @@ func (s *Service) validateStudentID(ctx context.Context, studentID string) error
 }
 
 var (
+	ErrInvalidPrice                   = fmt.Errorf("invalid_price")
 	ErrInvalidOfferTarget             = fmt.Errorf("invalid_offer_target")
 	ErrTeacherContentCannotBePaid     = fmt.Errorf("teacher_content_cannot_be_paid")
 	ErrOfferNotFound                  = fmt.Errorf("offer_not_found")

@@ -1182,6 +1182,8 @@ func NewRouter(deps Dependencies) http.Handler {
 				view, err := deps.Commerce.CreateOffer(r.Context(), session.AccountID, input)
 				if err != nil {
 					switch err {
+					case commerce.ErrInvalidPrice:
+						writeError(w, http.StatusBadRequest, "invalid_price", "Price must be positive", nil)
 					case commerce.ErrInvalidOfferTarget:
 						writeError(w, http.StatusUnprocessableEntity, "invalid_offer_target", "Invalid offer target", nil)
 					case commerce.ErrTeacherContentCannotBePaid:
@@ -1202,6 +1204,8 @@ func NewRouter(deps Dependencies) http.Handler {
 				view, err := deps.Commerce.UpdateOffer(r.Context(), chi.URLParam(r, "offerID"), input)
 				if err != nil {
 					switch err {
+					case commerce.ErrInvalidPrice:
+						writeError(w, http.StatusBadRequest, "invalid_price", "Price must be positive", nil)
 					case commerce.ErrInvalidOfferTarget:
 						writeError(w, http.StatusUnprocessableEntity, "invalid_offer_target", "Invalid offer target", nil)
 					case commerce.ErrOfferNotFound:

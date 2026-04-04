@@ -11,6 +11,8 @@ const AuthPage = lazy(() => import('./pages/public/AuthPage'));
 const RoleSelect = lazy(() => import('./pages/public/RoleSelect'));
 const StudentOnboarding = lazy(() => import('./pages/public/StudentOnboarding'));
 const TeacherOnboarding = lazy(() => import('./pages/public/TeacherOnboarding'));
+const PaymentSuccess = lazy(() => import('./pages/public/PaymentSuccess'));
+const PaymentFail = lazy(() => import('./pages/public/PaymentFail'));
 
 // Student
 const StudentCatalog = lazy(() => import('./pages/student/Catalog'));
@@ -226,6 +228,10 @@ export default function App() {
             <Route path="/admin/preview/:previewSessionId" element={
               <RequireRole role="admin"><PreviewPlayer /></RequireRole>
             } />
+
+            {/* Payment result pages (T-Bank redirects here after checkout) */}
+            <Route path="/success" element={<PaymentSuccess />} />
+            <Route path="/fail" element={<PaymentFail />} />
 
             {/* 404 */}
             <Route path="*" element={
