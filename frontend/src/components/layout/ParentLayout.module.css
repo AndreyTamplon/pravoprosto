@@ -114,6 +114,54 @@
   font-size: 1.1rem;
   font-weight: 800;
   color: var(--teal);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hamburger {
+  font-size: 1.4rem;
+  color: var(--teal);
+  cursor: pointer;
+}
+
+.mobileOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 41, 59, 0.6);
+  z-index: 60;
+}
+
+.mobileOverlayOpen {
+  display: block;
+}
+
+.mobileSidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  background: var(--white);
+  border-right: var(--border-thick);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  overflow-y: auto;
+}
+
+.mobileSidebarOpen {
+  transform: translateX(0);
+}
+
+.mobileCloseBtn {
+  align-self: flex-end;
+  margin: 12px 12px 0 0;
+  font-size: 1.3rem;
+  color: var(--gray-500);
+  cursor: pointer;
 }
 
 .bottomNav {
@@ -167,7 +215,7 @@
   }
 
   .mobileHeader {
-    display: block;
+    display: flex;
   }
 
   .bottomNav {

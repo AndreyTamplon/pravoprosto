@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import styles from './TeacherLayout.module.css';
 
 export default function TeacherLayout() {
   const { logout } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const navLinkCls = ({ isActive }: { isActive: boolean }) =>
     [styles.navLink, isActive ? styles.navLinkActive : '']
@@ -15,22 +17,26 @@ export default function TeacherLayout() {
       .filter(Boolean)
       .join(' ');
 
+  const navItems = (
+    <>
+      <NavLink to="/teacher" end className={navLinkCls} onClick={() => setMenuOpen(false)}>
+        <span className={styles.navIcon}>📖</span>
+        Мои курсы
+      </NavLink>
+      <NavLink to="/teacher/profile" className={navLinkCls} onClick={() => setMenuOpen(false)}>
+        <span className={styles.navIcon}>👤</span>
+        Профиль
+      </NavLink>
+    </>
+  );
+
   return (
     <div className={styles.layout}>
       {/* Desktop sidebar */}
       <aside className={styles.sidebar}>
         <div className={styles.logo}>Право Просто</div>
         <div className={styles.roleBadge}>Учитель</div>
-        <nav className={styles.nav}>
-          <NavLink to="/teacher" end className={navLinkCls}>
-            <span className={styles.navIcon}>📖</span>
-            Мои курсы
-          </NavLink>
-          <NavLink to="/teacher/profile" className={navLinkCls}>
-            <span className={styles.navIcon}>👤</span>
-            Профиль
-          </NavLink>
-        </nav>
+        <nav className={styles.nav}>{navItems}</nav>
         <button className={styles.logoutBtn} onClick={logout} type="button">
           Выйти
         </button>
@@ -38,7 +44,18 @@ export default function TeacherLayout() {
 
       <div className={styles.main}>
         {/* Mobile header */}
-        <div className={styles.mobileHeader}>Право Просто</div>
+        <div className={styles.mobileHeader}>
+          <button
+            className={styles.hamburger}
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            type="button"
+          >
+            ☰
+          </button>
+          <span>Право Просто</span>
+          <span style={{ width: 24 }} />
+        </div>
 
         <div className={styles.content}>
           <Outlet />
@@ -58,6 +75,32 @@ export default function TeacherLayout() {
           </NavLink>
         </div>
       </nav>
+
+      {/* Mobile drawer overlay */}
+      <div
+        className={`${styles.mobileOverlay} ${menuOpen ? styles.mobileOverlayOpen : ''}`}
+        onClick={() => setMenuOpen(false)}
+      />
+
+      {/* Mobile drawer sidebar */}
+      <aside
+        className={`${styles.mobileSidebar} ${menuOpen ? styles.mobileSidebarOpen : ''}`}
+      >
+        <button
+          className={styles.mobileCloseBtn}
+          onClick={() => setMenuOpen(false)}
+          aria-label="Close menu"
+          type="button"
+        >
+          ✕
+        </button>
+        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.roleBadge}>Учитель</div>
+        <nav className={styles.nav}>{navItems}</nav>
+        <button className={styles.logoutBtn} onClick={logout} type="button">
+          Выйти
+        </button>
+      </aside>
     </div>
   );
 }

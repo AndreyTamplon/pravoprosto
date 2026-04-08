@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApi } from '../../hooks/useApi';
@@ -8,6 +9,7 @@ import styles from './StudentLayout.module.css';
 export default function StudentLayout() {
   const { logout } = useAuth();
   const { data: game, loading } = useApi(getGameState, []);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const navLinkCls = ({ isActive }: { isActive: boolean }) =>
     [styles.navLink, isActive ? styles.navLinkActive : '']
@@ -19,21 +21,25 @@ export default function StudentLayout() {
       .filter(Boolean)
       .join(' ');
 
+  const navItems = (
+    <>
+      <NavLink to="/student/courses" className={navLinkCls} onClick={() => setMenuOpen(false)}>
+        <span className={styles.navIcon}>📚</span>
+        Курсы
+      </NavLink>
+      <NavLink to="/student/profile" className={navLinkCls} onClick={() => setMenuOpen(false)}>
+        <span className={styles.navIcon}>👤</span>
+        Профиль
+      </NavLink>
+    </>
+  );
+
   return (
     <div className={styles.layout}>
       {/* Desktop left sidebar */}
       <aside className={styles.sidebar}>
         <div className={styles.logo}>Право Просто</div>
-        <nav className={styles.nav}>
-          <NavLink to="/student/courses" className={navLinkCls}>
-            <span className={styles.navIcon}>📚</span>
-            Курсы
-          </NavLink>
-          <NavLink to="/student/profile" className={navLinkCls}>
-            <span className={styles.navIcon}>👤</span>
-            Профиль
-          </NavLink>
-        </nav>
+        <nav className={styles.nav}>{navItems}</nav>
         <button className={styles.logoutBtn} onClick={logout} type="button">
           Выйти
         </button>
@@ -43,8 +49,16 @@ export default function StudentLayout() {
       <div className={styles.main}>
         {/* Mobile top HUD */}
         <div className={styles.mobileHud}>
+          <button
+            className={styles.hamburger}
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            type="button"
+          >
+            ☰
+          </button>
           <span style={{ fontWeight: 800, fontSize: '1rem' }}>Право Просто</span>
-          {game && (
+          {game ? (
             <div className={styles.mobileStats}>
               <span className={`${styles.mobileStat} ${styles.mobileStatHearts}`}>
                 ♥ {game.hearts_current}
@@ -56,6 +70,8 @@ export default function StudentLayout() {
                 🔥 {game.current_streak_days}
               </span>
             </div>
+          ) : (
+            <span style={{ width: 24 }} />
           )}
         </div>
 
@@ -118,6 +134,31 @@ export default function StudentLayout() {
           </NavLink>
         </div>
       </nav>
+
+      {/* Mobile drawer overlay */}
+      <div
+        className={`${styles.mobileOverlay} ${menuOpen ? styles.mobileOverlayOpen : ''}`}
+        onClick={() => setMenuOpen(false)}
+      />
+
+      {/* Mobile drawer sidebar */}
+      <aside
+        className={`${styles.mobileSidebar} ${menuOpen ? styles.mobileSidebarOpen : ''}`}
+      >
+        <button
+          className={styles.mobileCloseBtn}
+          onClick={() => setMenuOpen(false)}
+          aria-label="Close menu"
+          type="button"
+        >
+          ✕
+        </button>
+        <div className={styles.logo}>Право Просто</div>
+        <nav className={styles.nav}>{navItems}</nav>
+        <button className={styles.logoutBtn} onClick={logout} type="button">
+          Выйти
+        </button>
+      </aside>
     </div>
   );
 }
