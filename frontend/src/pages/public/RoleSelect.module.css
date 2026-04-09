@@ -8,20 +8,26 @@
 
 .wrap {
   width: 100%;
-  max-width: 700px;
+  max-width: 720px;
   text-align: center;
 }
 
+.brand {
+  margin: 0 auto 18px;
+  width: 165px;
+}
+
 .title {
+  font-family: var(--font-family-heading);
   font-size: 2rem;
-  font-weight: 800;
-  margin-bottom: 12px;
+  font-weight: 900;
+  margin-bottom: 10px;
 }
 
 .sub {
   font-size: 1rem;
   color: var(--dark-light);
-  margin-bottom: 40px;
+  margin-bottom: 34px;
 }
 
 .cards {
@@ -34,23 +40,25 @@
   padding: 32px 16px;
   text-align: center;
   cursor: pointer;
-  transition: transform var(--transition), box-shadow var(--transition);
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
 }
 
 .roleCard:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-comic-lg);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-comic);
+  border-color: #b7cce8;
 }
 
 .roleIcon {
-  font-size: 3.5rem;
+  font-size: 3.4rem;
   margin-bottom: 16px;
   display: block;
 }
 
 .roleName {
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-family: var(--font-family-heading);
+  font-size: 1.15rem;
+  font-weight: 800;
 }
 
 .selecting {

@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { ComicPanel } from '../../components/ui';
+import { ComicPanel, BrandLogo } from '../../components/ui';
 import styles from './AuthPage.module.css';
 
 export default function AuthPage() {
@@ -11,10 +11,9 @@ export default function AuthPage() {
   return (
     <div className={styles.page}>
       <ComicPanel className={styles.card}>
-        <span className={styles.mascot}>🛡️🤖</span>
-        <div className={styles.logo}>Право Просто</div>
+        <BrandLogo size="md" className={styles.logo} />
         <p className={styles.sub}>
-          Войди, чтобы начать свои миссии по правовой грамотности
+          Войдите, чтобы продолжить обучение в SmartGo School
         </p>
 
         <button
@@ -26,7 +25,7 @@ export default function AuthPage() {
         </button>
 
         <p className={styles.hint}>
-          Нет аккаунта? Войдите — он создастся автоматически
+          Нет аккаунта? Он создастся автоматически при первом входе
         </p>
       </ComicPanel>
     </div>

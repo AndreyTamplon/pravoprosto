@@ -1,4 +1,18 @@
 services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  backend:
+    ports:
+      - "8080:8080"
+    environment:
+      PRAVO_BASE_URL: http://localhost:8080
+      PRAVO_COOKIE_SECURE: "false"
+
   frontend:
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
       - /tmp/pravoprosto-letsencrypt:/etc/letsencrypt:ro

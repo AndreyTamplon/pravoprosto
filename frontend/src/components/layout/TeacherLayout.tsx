@@ -1,5 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { BrandLogo } from '../ui';
 import styles from './TeacherLayout.module.css';
 
 export default function TeacherLayout() {
@@ -19,7 +20,9 @@ export default function TeacherLayout() {
     <div className={styles.layout}>
       {/* Desktop sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <div className={styles.roleBadge}>Учитель</div>
         <nav className={styles.nav}>
           <NavLink to="/teacher" end className={navLinkCls}>
@@ -38,7 +41,7 @@ export default function TeacherLayout() {
 
       <div className={styles.main}>
         {/* Mobile header */}
-        <div className={styles.mobileHeader}>Право Просто</div>
+        <div className={styles.mobileHeader}>SmartGo School</div>
 
         <div className={styles.content}>
           <Outlet />

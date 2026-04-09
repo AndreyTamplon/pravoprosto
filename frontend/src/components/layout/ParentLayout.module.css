@@ -17,12 +17,15 @@
 }
 
 .logo {
-  padding: 20px 16px 12px;
-  font-size: 1.3rem;
-  font-weight: 800;
-  color: var(--teal);
-  letter-spacing: -0.5px;
+  padding: 16px 16px 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   border-bottom: var(--border-thin);
+}
+
+.logoImage {
+  width: 132px;
 }
 
 .nav {
@@ -108,12 +111,13 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  background: var(--white);
-  border-bottom: var(--border);
+  background: linear-gradient(90deg, #0f2f53 0%, #17558f 45%, #33894a 100%);
+  border-bottom: var(--border-thick);
   padding: 12px 16px;
   font-size: 1.1rem;
   font-weight: 800;
-  color: var(--teal);
+  color: var(--white);
+  font-family: var(--font-family-heading);
 }
 
 .bottomNav {

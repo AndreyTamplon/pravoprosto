@@ -2,17 +2,17 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { getPromoCourses } from '../../api/client';
-import { Button, ComicPanel, Badge, Spinner } from '../../components/ui';
+import { Button, ComicPanel, Badge, Spinner, BrandLogo } from '../../components/ui';
 import styles from './Landing.module.css';
 
 const TOPIC_EMOJIS: Record<string, string> = {
-  default: '📚',
+  default: '💡',
 };
 
 const HOW_STEPS = [
-  { icon: '🎯', title: 'Выбери миссию', desc: 'Найди тему, которая тебе интересна: мошенники, покупки, буллинг или другие.' },
-  { icon: '📖', title: 'Пройди историю', desc: 'Читай комиксы, принимай решения и отвечай на вопросы вместе с героями.' },
-  { icon: '🏆', title: 'Получи навык', desc: 'Зарабатывай XP, собирай награды и учись защищать свои права в реальной жизни.' },
+  { icon: '🧮', title: 'Выбери модуль', desc: 'Найди тему, которая тебе интересна: логика, коммуникация, безопасность или цифровая грамотность.' },
+  { icon: '📘', title: 'Пройди урок', desc: 'Изучай интерактивные задания, решай мини-кейсы и закрепляй материал на практике.' },
+  { icon: '🧪', title: 'Проверь себя', desc: 'Получай очки прогресса, собирай достижения и переходи к новым уровням обучения.' },
 ];
 
 const FOR_WHOM = [
@@ -50,24 +50,23 @@ export default function Landing() {
     <div>
       {/* Hero */}
       <section className={styles.hero}>
-        <div className={styles.heroHalftone} />
+        <div className={styles.heroGlowLeft} />
+        <div className={styles.heroGlowRight} />
         <div className={styles.heroInner}>
+          <BrandLogo variant="decorated" size="xl" className={styles.heroLogo} />
           <div className={styles.heroText}>
             <h1 className={styles.heroTitle}>
-              <span>Право Просто</span> — учись защищать себя через игру!
+              <span>SmartGo School</span> — обучение, которое действительно увлекает
             </h1>
             <p className={styles.heroSub}>
-              Интерактивные миссии по правовой грамотности для детей и подростков.
-              Комиксы, квесты и XP-система делают обучение увлекательным.
+              Интерактивная образовательная платформа для детей и подростков.
+              Яркие модули, практические задания и понятная система прогресса.
             </p>
             <div className={styles.heroCta}>
               <Button variant="primary" size="lg" onClick={handleCta}>
-                Начать
+                Начать обучение
               </Button>
             </div>
-          </div>
-          <div className={styles.heroMascot} aria-hidden="true">
-            🛡️🤖
           </div>
         </div>
       </section>
@@ -166,9 +165,9 @@ export default function Landing() {
       {/* Footer */}
       <footer className={styles.footer}>
         <div className={styles.footerInner}>
-          <div className={styles.footerLogo}>Право Просто</div>
+          <BrandLogo size="sm" className={styles.footerLogo} />
           <p className={styles.footerNote}>
-            Образовательная платформа по правовой грамотности для детей и подростков.
+            SmartGo School — современная образовательная платформа для детей, родителей и учителей.
           </p>
         </div>
       </footer>

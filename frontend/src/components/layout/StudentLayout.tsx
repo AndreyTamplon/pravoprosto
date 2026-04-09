@@ -2,7 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { getGameState } from '../../api/client';
-import { Spinner } from '../ui/Spinner';
+import { Spinner, BrandLogo } from '../ui';
 import styles from './StudentLayout.module.css';
 
 export default function StudentLayout() {
@@ -23,7 +23,9 @@ export default function StudentLayout() {
     <div className={styles.layout}>
       {/* Desktop left sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <nav className={styles.nav}>
           <NavLink to="/student/courses" className={navLinkCls}>
             <span className={styles.navIcon}>📚</span>
@@ -43,7 +45,7 @@ export default function StudentLayout() {
       <div className={styles.main}>
         {/* Mobile top HUD */}
         <div className={styles.mobileHud}>
-          <span style={{ fontWeight: 800, fontSize: '1rem' }}>Право Просто</span>
+          <span className={styles.mobileBrand}>SmartGo School</span>
           {game && (
             <div className={styles.mobileStats}>
               <span className={`${styles.mobileStat} ${styles.mobileStatHearts}`}>

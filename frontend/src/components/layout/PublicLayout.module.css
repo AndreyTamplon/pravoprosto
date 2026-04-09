@@ -9,23 +9,26 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 24px;
-  border-bottom: var(--border);
+  border-bottom: var(--border-thick);
   background: var(--white);
   position: sticky;
   top: 0;
   z-index: 50;
+  box-shadow: var(--shadow-comic-xs);
 }
 
 .logo {
-  font-size: 1.3rem;
-  font-weight: 800;
-  color: var(--teal);
-  letter-spacing: -0.5px;
+  display: inline-flex;
+  align-items: center;
   text-decoration: none;
 }
 
 .logo:hover {
   text-decoration: none;
+}
+
+.logoImage {
+  width: 136px;
 }
 
 .headerActions {

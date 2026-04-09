@@ -1,5 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { BrandLogo } from '../ui';
 import styles from './ParentLayout.module.css';
 
 export default function ParentLayout() {
@@ -19,7 +20,9 @@ export default function ParentLayout() {
     <div className={styles.layout}>
       {/* Desktop sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <nav className={styles.nav}>
           <NavLink to="/parent" end className={navLinkCls}>
             <span className={styles.navIcon}>👨‍👧‍👦</span>
@@ -37,7 +40,7 @@ export default function ParentLayout() {
 
       <div className={styles.main}>
         {/* Mobile header */}
-        <div className={styles.mobileHeader}>Право Просто</div>
+        <div className={styles.mobileHeader}>SmartGo School</div>
 
         <div className={styles.content}>
           <Outlet />
