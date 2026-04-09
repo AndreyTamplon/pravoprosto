@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import {
   getAdminDraft, updateAdminDraft, publishAdminCourse, createAdminPreview,
+  deleteAdminCourse,
 } from '../../api/client';
 import { Button, Badge, Spinner, Modal, Input, EmptyState } from '../../components/ui';
 import { graphToBackendFormat, isBackendLessonGraph } from '../../api/types';
@@ -66,6 +67,11 @@ export default function AdminCourseEditor() {
 
   // Preview
   const [previewing, setPreviewing] = useState(false);
+
+  // Delete
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   // Initialize local state from draft
   useEffect(() => {
@@ -162,6 +168,20 @@ export default function AdminCourseEditor() {
     }
   }, [courseId, handleSave, location.pathname]);
 
+  const handleDelete = useCallback(async () => {
+    if (!courseId) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await deleteAdminCourse(courseId);
+      navigate('/admin/courses');
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Ошибка удаления');
+    } finally {
+      setDeleting(false);
+    }
+  }, [courseId, navigate]);
+
   async function handleEditLesson(lessonId: string) {
     if (!courseId) return;
 
@@ -238,6 +258,9 @@ export default function AdminCourseEditor() {
           </span>
         </div>
         <div className={styles.headerActions}>
+          {draft.workflow_status !== 'archived' && (
+            <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>Удалить</Button>
+          )}
           <Button variant="secondary" onClick={() => { void handleSave().catch(() => undefined); }} loading={saving}>Сохранить</Button>
           <Button variant="success" onClick={handlePublish} loading={publishing}>Опубликовать</Button>
         </div>
@@ -356,6 +379,18 @@ export default function AdminCourseEditor() {
           <div className={styles.modalActions}>
             <Button variant="secondary" onClick={() => setShowRenameModule(null)}>Отмена</Button>
             <Button onClick={renameModule} disabled={!renameModuleTitle.trim()}>Сохранить</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete confirmation modal */}
+      <Modal open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Удалить курс">
+        <div className={styles.modalForm}>
+          <p>Вы уверены, что хотите удалить курс <strong>{localTitle}</strong>? Курс будет архивирован и станет недоступен для учеников.</p>
+          {deleteError && <div className={styles.error}>{deleteError}</div>}
+          <div className={styles.modalActions}>
+            <Button variant="secondary" onClick={() => setShowDeleteConfirm(false)}>Отмена</Button>
+            <Button variant="danger" onClick={handleDelete} loading={deleting}>Удалить</Button>
           </div>
         </div>
       </Modal>

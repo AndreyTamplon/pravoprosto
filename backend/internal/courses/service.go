@@ -489,6 +489,36 @@ func (s *Service) ArchiveCourse(ctx context.Context, teacherID string, courseID 
 	return map[string]string{"course_id": courseID, "status": "archived"}, nil
 }
 
+func (s *Service) AdminArchiveCourse(ctx context.Context, courseID string) (map[string]string, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		update courses
+		set deleted_at = now(), status = 'archived'
+		where id = $1 and deleted_at is null
+	`, courseID)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrCourseNotFound
+	}
+	if _, err := tx.Exec(ctx, `
+		update course_drafts
+		set workflow_status = 'archived', updated_at = now()
+		where course_id = $1
+	`, courseID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return map[string]string{"course_id": courseID, "status": "archived"}, nil
+}
+
 func (s *Service) ensureCourseAccess(ctx context.Context, role string, actorID string, courseID string) error {
 	var count int
 	var err error

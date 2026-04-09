@@ -508,6 +508,7 @@ export const getModerationReviewDraft = async (reviewId: string): Promise<import
 export const updateAdminDraft = (courseId: string, data: import('./types').UpdateDraftInput) =>
   put<{ draft_version: number }>(`/admin/courses/${courseId}/draft`, buildDraftBody(data));
 export const publishAdminCourse = (courseId: string) => post<void>(`/admin/courses/${courseId}/publish`);
+export const deleteAdminCourse = (courseId: string) => del<void>(`/admin/courses/${courseId}`);
 export const createAdminPreview = async (
   courseId: string,
   lessonId: string,

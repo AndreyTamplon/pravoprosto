@@ -1060,6 +1060,18 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusOK, view)
 			}, deps)))
+			ar.Delete("/courses/{courseID}", requireRole("admin", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				view, err := deps.Courses.AdminArchiveCourse(r.Context(), chi.URLParam(r, "courseID"))
+				if err != nil {
+					if err == courses.ErrCourseNotFound {
+						writeError(w, http.StatusNotFound, "course_not_found", "Course not found", nil)
+						return
+					}
+					writeInternalError(w)
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}, deps)))
 			ar.Post("/courses/{courseID}/access-grants", requireRole("admin", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 				session, _ := sessionFromContext(r.Context())
 				var body struct {
