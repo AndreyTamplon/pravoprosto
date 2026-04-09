@@ -9,7 +9,7 @@ import {
   goBackInLesson,
   getGameState,
 } from '../../api/client';
-import { generateIdempotencyKey, formatMinutesTimer } from '../../utils/format';
+import { generateIdempotencyKey } from '../../utils/format';
 import { HudBar, Button, SpeechBubble, ComicBurst } from '../../components/ui';
 import type {
   StepView,
@@ -29,7 +29,6 @@ type PlayerScreen =
   | { kind: 'checking' }
   | { kind: 'feedback'; result: AnswerOutcome }
   | { kind: 'complete'; completion: Record<string, unknown> | null }
-  | { kind: 'hearts_empty'; recoveryAt?: string | null }
   | { kind: 'error'; message: string };
 
 /* ===== Confetti helper ===== */
@@ -61,33 +60,6 @@ function Confetti() {
           }}
         />
       ))}
-    </div>
-  );
-}
-
-/* ===== Recovery Timer ===== */
-function RecoveryTimer({ recoveryAt }: { recoveryAt?: string | null }) {
-  const [secondsLeft, setSecondsLeft] = useState(0);
-
-  useEffect(() => {
-    if (!recoveryAt) return;
-    const target = new Date(recoveryAt).getTime();
-
-    const tick = () => {
-      const diff = Math.max(0, Math.ceil((target - Date.now()) / 1000));
-      setSecondsLeft(diff);
-    };
-
-    tick();
-    const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
-  }, [recoveryAt]);
-
-  if (!recoveryAt || secondsLeft <= 0) return null;
-
-  return (
-    <div className={styles.recoveryTimer}>
-      {formatMinutesTimer(secondsLeft)}
     </div>
   );
 }
@@ -222,17 +194,8 @@ export default function LessonPlayer() {
       // Track XP
       setSessionXp((x) => x + result.xp_delta);
 
-      // Update hearts from the answer outcome game_state
-      const newHearts = result.game_state.hearts_current;
+      // Update game state from the answer outcome
       setCurrentStep((step) => (step ? { ...step, game_state: result.game_state } : step));
-      setGameState((gs) => gs ? { ...gs, hearts_current: newHearts, hearts_restore_at: result.game_state.hearts_restore_at } : gs);
-
-      // Check if hearts are depleted
-      if (newHearts <= 0) {
-        setScreen({ kind: 'hearts_empty', recoveryAt: result.game_state.hearts_restore_at });
-        setSubmitting(false);
-        return;
-      }
 
       // Update current step if next_step is present
       if (result.next_step) {
@@ -313,8 +276,6 @@ export default function LessonPlayer() {
   const elapsedMinutes = Math.floor(elapsedSeconds / 60);
 
   // Render HudBar
-  const hearts = currentStep?.game_state?.hearts_current ?? gameState?.hearts_current ?? 5;
-  const heartsMax = currentStep?.game_state?.hearts_max ?? gameState?.hearts_max ?? 5;
   const xp = currentStep?.game_state?.xp_total ?? gameState?.xp_total ?? 0;
   const streak = gameState?.current_streak_days ?? 0;
   const progress = currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
@@ -340,8 +301,6 @@ export default function LessonPlayer() {
       <HudBar
         onClose={handleClose}
         progress={progress}
-        hearts={hearts}
-        heartsMax={heartsMax}
         xp={xp}
         streak={streak}
       />
@@ -552,21 +511,6 @@ export default function LessonPlayer() {
           </div>
         )}
 
-        {/* Hearts Empty */}
-        {screen.kind === 'hearts_empty' && (
-          <div className={styles.heartsEmptyScreen} data-role="hearts-empty">
-            <div className={styles.heartsEmptyMascot}>😢</div>
-            <div className={styles.heartsEmptyTitle}>Жизни закончились 💔</div>
-            <div className={styles.heartsEmptyDesc}>
-              Подожди, пока жизни восстановятся, или повтори пройденные уроки
-            </div>
-            <RecoveryTimer recoveryAt={screen.recoveryAt} />
-            <Button variant="outline" onClick={handleClose}>
-              К пройденным урокам
-            </Button>
-          </div>
-        )}
-
         {/* Lesson Complete */}
         {screen.kind === 'complete' && (
           <>
@@ -650,10 +594,6 @@ export default function LessonPlayer() {
 
             {screen.result.xp_delta > 0 && (
               <div className={styles.feedbackXp}>+{screen.result.xp_delta} XP ⭐</div>
-            )}
-
-            {screen.result.hearts_delta < 0 && (
-              <div className={styles.feedbackHearts}>{screen.result.hearts_delta} ❤️</div>
             )}
 
             <div className={styles.feedbackAction}>

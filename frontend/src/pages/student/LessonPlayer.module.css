@@ -193,12 +193,6 @@
   color: var(--teal);
 }
 
-.feedbackHearts {
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: var(--red);
-}
-
 .feedbackAction {
   margin-top: 4px;
 }
@@ -301,38 +295,6 @@
 .loadingText {
   font-weight: 600;
   color: var(--dark-light);
-}
-
-/* ===== Hearts Empty ===== */
-.heartsEmptyScreen {
-  text-align: center;
-  animation: floatUp 0.5s ease;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-.heartsEmptyMascot {
-  font-size: 4rem;
-}
-
-.heartsEmptyTitle {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--red);
-}
-
-.heartsEmptyDesc {
-  color: var(--dark-light);
-  font-size: 1rem;
-  line-height: 1.5;
-}
-
-.recoveryTimer {
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: var(--pink);
 }
 
 /* ===== Error state ===== */

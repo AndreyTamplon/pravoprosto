@@ -506,8 +506,6 @@ func NewRouter(deps Dependencies) http.Handler {
 						writeError(w, http.StatusConflict, "lesson_session_state_conflict", "Lesson session state conflict", nil)
 					case lessonruntime.ErrDuplicateAnswerSubmission:
 						writeError(w, http.StatusConflict, "duplicate_answer_submission", "Duplicate answer submission", nil)
-					case lessonruntime.ErrOutOfHearts:
-						writeError(w, http.StatusConflict, "out_of_hearts", "Out of hearts", nil)
 					case lessonruntime.ErrLockedTeacherAccess:
 						writeError(w, http.StatusForbidden, "locked_teacher_access", "Teacher course access is locked", nil)
 					case lessonruntime.ErrContentLockedPaid:

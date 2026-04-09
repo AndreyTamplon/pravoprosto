@@ -690,51 +690,31 @@ func (s *Service) ensureGameStateTx(ctx context.Context, tx pgx.Tx, studentID st
 		return gameState{}, err
 	}
 	var state gameState
-	var updatedAt time.Time
 	if err := tx.QueryRow(ctx, `
-		select sgs.xp_total, sgs.level, sgs.hearts_current, sgs.hearts_max, sgs.hearts_updated_at,
+		select sgs.xp_total, sgs.level,
 		       sss.current_streak_days, sss.best_streak_days
 		from student_game_state sgs
 		join student_streak_state sss on sss.student_id = sgs.student_id
 		where sgs.student_id = $1
 		for update of sgs, sss
-	`, studentID).Scan(&state.XPTotal, &state.Level, &state.HeartsCurrent, &state.HeartsMax, &updatedAt, &state.CurrentStreakDays, &state.BestStreakDays); err != nil {
+	`, studentID).Scan(&state.XPTotal, &state.Level, &state.CurrentStreakDays, &state.BestStreakDays); err != nil {
 		return gameState{}, err
-	}
-	recovered := int(time.Since(updatedAt) / s.config.HeartsRestorePeriod)
-	if recovered > 0 && state.HeartsCurrent < state.HeartsMax {
-		state.HeartsCurrent += recovered
-		if state.HeartsCurrent > state.HeartsMax {
-			state.HeartsCurrent = state.HeartsMax
-		}
-		if _, err := tx.Exec(ctx, `update student_game_state set hearts_current = $2, hearts_updated_at = now(), updated_at = now() where student_id = $1`, studentID, state.HeartsCurrent); err != nil {
-			return gameState{}, err
-		}
-		updatedAt = time.Now()
-	}
-	if state.HeartsCurrent < state.HeartsMax {
-		restoreAt := updatedAt.Add(s.config.HeartsRestorePeriod).UTC().Format(time.RFC3339)
-		state.HeartsRestoreAt = &restoreAt
 	}
 	return state, nil
 }
 
-func (s *Service) applyGameMutationTx(ctx context.Context, tx pgx.Tx, studentID string, xpDelta int, heartsDelta int) error {
+func (s *Service) applyGameMutationTx(ctx context.Context, tx pgx.Tx, studentID string, xpDelta int) error {
 	state, err := s.ensureGameStateTx(ctx, tx, studentID)
 	if err != nil {
 		return err
 	}
 	newXP := state.XPTotal + int64(xpDelta)
-	newHearts := state.HeartsCurrent + heartsDelta
-	if newHearts < 0 {
-		newHearts = 0
-	}
 	level := calcLevel(newXP)
 	if _, err := tx.Exec(ctx, `
 		update student_game_state
-		set xp_total = $2, level = $3, hearts_current = $4, hearts_updated_at = now(), updated_at = now()
+		set xp_total = $2, level = $3, updated_at = now()
 		where student_id = $1
-	`, studentID, newXP, level, newHearts); err != nil {
+	`, studentID, newXP, level); err != nil {
 		return err
 	}
 	return nil

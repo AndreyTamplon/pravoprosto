@@ -60,9 +60,6 @@ export default function StudentLayout() {
           <span style={{ fontWeight: 800, fontSize: '1rem' }}>Право Просто</span>
           {game ? (
             <div className={styles.mobileStats}>
-              <span className={`${styles.mobileStat} ${styles.mobileStatHearts}`}>
-                ♥ {game.hearts_current}
-              </span>
               <span className={`${styles.mobileStat} ${styles.mobileStatXp}`}>
                 ★ {game.xp_total}
               </span>
@@ -106,17 +103,6 @@ export default function StudentLayout() {
               <div className={styles.widgetSub}>Уровень {game.level}</div>
             </div>
 
-            <div className={styles.widget}>
-              <div className={styles.widgetTitle}>Жизни</div>
-              <div className={`${styles.widgetValue} ${styles.heartsVal}`}>
-                ♥ {game.hearts_current}/{game.hearts_max}
-              </div>
-              {game.hearts_restore_at && (
-                <div className={styles.widgetSub}>
-                  Восстановление скоро
-                </div>
-              )}
-            </div>
           </>
         ) : null}
       </aside>

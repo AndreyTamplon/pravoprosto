@@ -48,9 +48,6 @@ type CourseTreeView struct {
 type GameStateView struct {
 	XPTotal           int64            `json:"xp_total"`
 	Level             int              `json:"level"`
-	HeartsCurrent     int              `json:"hearts_current"`
-	HeartsMax         int              `json:"hearts_max"`
-	HeartsRestoreAt   *string          `json:"hearts_restore_at"`
 	CurrentStreakDays int              `json:"current_streak_days"`
 	BestStreakDays    int              `json:"best_streak_days"`
 	Badges            []map[string]any `json:"badges"`
@@ -78,18 +75,14 @@ type StepNavigation struct {
 }
 
 type GameStateMini struct {
-	XPTotal         int64   `json:"xp_total"`
-	Level           int     `json:"level"`
-	HeartsCurrent   int     `json:"hearts_current"`
-	HeartsMax       int     `json:"hearts_max"`
-	HeartsRestoreAt *string `json:"hearts_restore_at"`
+	XPTotal int64 `json:"xp_total"`
+	Level   int   `json:"level"`
 }
 
 type AnswerOutcome struct {
 	Verdict          string         `json:"verdict"`
 	FeedbackText     string         `json:"feedback_text"`
 	XPDelta          int            `json:"xp_delta"`
-	HeartsDelta      int            `json:"hearts_delta"`
 	GameState        GameStateMini  `json:"game_state"`
 	NextAction       string         `json:"next_action"`
 	NextNodeID       *string        `json:"next_node_id"`
@@ -277,9 +270,6 @@ func (s *Service) GameState(ctx context.Context, studentID string) (GameStateVie
 	return GameStateView{
 		XPTotal:           state.XPTotal,
 		Level:             state.Level,
-		HeartsCurrent:     state.HeartsCurrent,
-		HeartsMax:         state.HeartsMax,
-		HeartsRestoreAt:   state.HeartsRestoreAt,
 		CurrentStreakDays: state.CurrentStreakDays,
 		BestStreakDays:    state.BestStreakDays,
 		Badges:            badges,
@@ -646,13 +636,6 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 		return AnswerOutcome{}, ErrDuplicateAnswerSubmission
 	}
 
-	state, err := s.ensureGameStateTx(ctx, tx, studentID)
-	if err != nil {
-		return AnswerOutcome{}, err
-	}
-	if state.HeartsCurrent <= 0 {
-		return AnswerOutcome{}, ErrOutOfHearts
-	}
 	graph, err := s.graphForRevisionLessonTx(ctx, tx, revisionID, lessonID)
 	if err != nil {
 		return AnswerOutcome{}, err
@@ -672,17 +655,13 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 	if err != nil {
 		return AnswerOutcome{}, err
 	}
-	var heartsDelta int
 	var xpDelta int
-	if evaluationResult.Verdict == "incorrect" {
-		heartsDelta = -1
-	}
 	if evaluationResult.Verdict == "correct" {
 		xpDelta = 10
 	} else if evaluationResult.Verdict == "partial" {
 		xpDelta = 5
 	}
-	if err := s.applyGameMutationTx(ctx, tx, studentID, xpDelta, heartsDelta); err != nil {
+	if err := s.applyGameMutationTx(ctx, tx, studentID, xpDelta); err != nil {
 		return AnswerOutcome{}, err
 	}
 	var attemptNo int
@@ -734,12 +713,12 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 	}
 	if _, err := tx.Exec(ctx, `
 		insert into game_events(student_id, source_type, source_id, event_type, xp_delta, hearts_delta, streak_delta)
-		values ($1, 'step_attempt', $2, 'evaluated', $3, $4, 0)
-	`, studentID, attemptID, xpDelta, heartsDelta); err != nil {
+		values ($1, 'step_attempt', $2, 'evaluated', $3, 0, 0)
+	`, studentID, attemptID, xpDelta); err != nil {
 		return AnswerOutcome{}, err
 	}
 
-	state, err = s.ensureGameStateTx(ctx, tx, studentID)
+	state, err := s.ensureGameStateTx(ctx, tx, studentID)
 	if err != nil {
 		return AnswerOutcome{}, err
 	}
@@ -756,8 +735,7 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 			Verdict:          evaluationResult.Verdict,
 			FeedbackText:     evaluationResult.Feedback,
 			XPDelta:          xpDelta,
-			HeartsDelta:      heartsDelta,
-			GameState:        state.toMini(),
+				GameState:        state.toMini(),
 			NextAction:       "lesson_completed",
 			NextNodeID:       nil,
 			LessonCompletion: completion,
@@ -783,7 +761,6 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 		Verdict:          evaluationResult.Verdict,
 		FeedbackText:     evaluationResult.Feedback,
 		XPDelta:          xpDelta,
-		HeartsDelta:      heartsDelta,
 		GameState:        state.toMini(),
 		NextAction:       "show_next_node",
 		NextNodeID:       &evaluationResult.NextNodeID,
@@ -1021,20 +998,14 @@ func (s *Service) Retry(ctx context.Context, studentID string, courseID string, 
 type gameState struct {
 	XPTotal           int64
 	Level             int
-	HeartsCurrent     int
-	HeartsMax         int
-	HeartsRestoreAt   *string
 	CurrentStreakDays int
 	BestStreakDays    int
 }
 
 func (g gameState) toMini() GameStateMini {
 	return GameStateMini{
-		XPTotal:         g.XPTotal,
-		Level:           g.Level,
-		HeartsCurrent:   g.HeartsCurrent,
-		HeartsMax:       g.HeartsMax,
-		HeartsRestoreAt: g.HeartsRestoreAt,
+		XPTotal: g.XPTotal,
+		Level:   g.Level,
 	}
 }
 
@@ -1052,6 +1023,5 @@ var (
 	ErrContentAccessAwaitingConfirmation = fmt.Errorf("content_access_awaiting_confirmation")
 	ErrLockedTeacherAccess               = fmt.Errorf("locked_teacher_access")
 	ErrLockedPrerequisite                = fmt.Errorf("locked_prerequisite")
-	ErrOutOfHearts                       = fmt.Errorf("out_of_hearts")
 	ErrLLMTemporarilyUnavailable         = fmt.Errorf("llm_temporarily_unavailable")
 )

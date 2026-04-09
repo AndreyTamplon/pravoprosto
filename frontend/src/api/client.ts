@@ -188,9 +188,6 @@ function normalizeStep(raw: Record<string, unknown>): import('./types').StepView
     game_state: {
       xp_total: (gameState.xp_total ?? 0) as number,
       level: (gameState.level ?? 1) as number,
-      hearts_current: (gameState.hearts_current ?? 5) as number,
-      hearts_max: (gameState.hearts_max ?? 5) as number,
-      hearts_restore_at: (gameState.hearts_restore_at as string | null | undefined) ?? null,
     },
     navigation: {
       can_go_back: Boolean(navigation.can_go_back),
@@ -313,7 +310,6 @@ export const submitAnswer = async (sessionId: string, body: { node_id: string; a
     verdict: (raw.verdict ?? 'incorrect') as import('./types').AnswerOutcome['verdict'],
     feedback_text: (raw.feedback_text ?? '') as string,
     xp_delta: (raw.xp_delta ?? 0) as number,
-    hearts_delta: (raw.hearts_delta ?? 0) as number,
     game_state: normalizeStep({
       game_state: raw.game_state,
     }).game_state,

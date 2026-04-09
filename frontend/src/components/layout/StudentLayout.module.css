@@ -146,7 +146,6 @@
 
 .streakVal { color: var(--orange); }
 .xpVal { color: var(--teal); }
-.heartsVal { color: var(--pink); }
 
 .widgetSub {
   font-size: 0.75rem;
@@ -181,7 +180,6 @@
   gap: 3px;
 }
 
-.mobileStatHearts { color: var(--pink); }
 .mobileStatXp { color: var(--orange); }
 .mobileStatStreak { color: var(--yellow); }
 

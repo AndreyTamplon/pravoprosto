@@ -138,9 +138,6 @@ export interface LessonOffer {
 export interface GameStateMini {
   xp_total: number;
   level: number;
-  hearts_current: number;
-  hearts_max: number;
-  hearts_restore_at?: string | null;
 }
 
 export interface StepView {
@@ -196,7 +193,6 @@ export interface AnswerOutcome {
   verdict: 'correct' | 'partial' | 'incorrect';
   feedback_text: string;
   xp_delta: number;
-  hearts_delta: number;
   game_state: GameStateMini;
   next_action: string;
   next_node_id?: string;
@@ -208,9 +204,6 @@ export interface AnswerOutcome {
 export interface GameState {
   xp_total: number;
   level: number;
-  hearts_current: number;
-  hearts_max: number;
-  hearts_restore_at?: string | null;
   current_streak_days: number;
   best_streak_days: number;
   badges: Badge[];

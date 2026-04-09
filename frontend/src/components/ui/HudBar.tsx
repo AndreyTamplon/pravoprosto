@@ -4,8 +4,6 @@ import styles from './HudBar.module.css';
 interface HudBarProps {
   onClose: () => void;
   progress: number;
-  hearts: number;
-  heartsMax: number;
   xp: number;
   streak: number;
 }
@@ -13,8 +11,6 @@ interface HudBarProps {
 export function HudBar({
   onClose,
   progress,
-  hearts,
-  heartsMax,
   xp,
   streak,
 }: HudBarProps) {
@@ -34,14 +30,6 @@ export function HudBar({
       </div>
 
       <div className={styles.stats}>
-        <span
-          className={`${styles.stat} ${styles.hearts}`}
-          data-role="hearts"
-          data-remaining={hearts}
-          data-max={heartsMax}
-        >
-          ♥ {hearts}/{heartsMax}
-        </span>
         <span className={`${styles.stat} ${styles.xp}`} data-role="xp" data-value={xp}>
           ★ {xp}
         </span>
