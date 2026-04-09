@@ -3,7 +3,7 @@
 # Право Просто — Полезные скрипты
 # ============================================================================
 
-SSH_KEY="/Users/aatamplon/Downloads/id_rsa"
+SSH_KEY="~/.ssh/pravoprost_deploy"
 SSH_HOST="andrey@176.123.166.189"
 SSH="ssh -i $SSH_KEY $SSH_HOST"
 PSQL="sudo docker exec pravoprost-postgres-1 psql -U pravoprost -d pravoprost -c"

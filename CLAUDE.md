@@ -31,7 +31,7 @@ npx playwright show-report              # HTML-отчёт
 ```bash
 # Копировать изменения
 rsync -avz --exclude='node_modules' --exclude='.git' --exclude='dist' \
-  -e "ssh -i /path/to/id_rsa" ./ andrey@176.123.166.189:~/pravoprost/
+  -e "ssh -i ~/.ssh/pravoprost_deploy" ./ andrey@176.123.166.189:~/pravoprost/
 
 # Пересобрать и перезапустить
 ssh andrey@176.123.166.189 "cd ~/pravoprost && sudo docker compose build && sudo docker compose up -d"
