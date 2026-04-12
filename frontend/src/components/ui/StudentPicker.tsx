@@ -16,7 +16,8 @@ export function StudentPicker({ label, value, displayValue, onChange, placeholde
   const [results, setResults] = useState<AdminUser[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const search = useCallback(async (q: string) => {
@@ -24,15 +25,29 @@ export function StudentPicker({ label, value, displayValue, onChange, placeholde
       setResults([]);
       return;
     }
+    const id = ++requestIdRef.current;
     setLoading(true);
     try {
       const users = await getAdminUsers({ role: 'student', q });
-      setResults(users);
+      if (requestIdRef.current === id) {
+        setResults(users);
+      }
     } catch {
-      setResults([]);
+      if (requestIdRef.current === id) {
+        setResults([]);
+      }
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === id) {
+        setLoading(false);
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      requestIdRef.current++;
+    };
   }, []);
 
   function handleInput(text: string) {
@@ -63,7 +78,9 @@ export function StudentPicker({ label, value, displayValue, onChange, placeholde
   }, []);
 
   useEffect(() => {
-    if (displayValue && !query) setQuery(displayValue);
+    if (displayValue !== undefined) {
+      setQuery(displayValue);
+    }
   }, [displayValue]);
 
   return (

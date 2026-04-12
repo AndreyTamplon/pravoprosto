@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useApi } from '../../hooks/useApi';
 import {
   getOffers, createOffer, updateOffer,
@@ -494,6 +494,17 @@ function EntitlementsTab() {
   const [successMsg, setSuccessMsg] = useState('');
   const [actionError, setActionError] = useState('');
   const [revokeLoading, setRevokeLoading] = useState<string | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (successTimerRef.current) clearTimeout(successTimerRef.current); };
+  }, []);
+
+  function showSuccess(msg: string) {
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    setSuccessMsg(msg);
+    successTimerRef.current = setTimeout(() => setSuccessMsg(''), 3000);
+  }
 
   async function handleGrant() {
     if (!grantStudentId.trim() || !grantCourseId) return;
@@ -506,11 +517,10 @@ function EntitlementsTab() {
       };
       if (grantTargetType === 'lesson' && grantLessonId) body.target_lesson_id = grantLessonId;
       await grantEntitlement(body);
-      setSuccessMsg('Доступ успешно выдан!');
+      showSuccess('Доступ успешно выдан!');
       setShowGrant(false);
       setGrantStudentId(''); setGrantStudentName(''); setGrantCourseId(''); setGrantLessonId('');
       reload();
-      setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) { setActionError(err instanceof Error ? err.message : 'Ошибка'); }
     finally { setGrantLoading(false); }
   }
@@ -519,9 +529,8 @@ function EntitlementsTab() {
     setRevokeLoading(entitlementId); setActionError(''); setSuccessMsg('');
     try {
       await revokeEntitlement(entitlementId);
-      setSuccessMsg('Доступ отозван');
+      showSuccess('Доступ отозван');
       reload();
-      setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) { setActionError(err instanceof Error ? err.message : 'Ошибка'); }
     finally { setRevokeLoading(null); }
   }
