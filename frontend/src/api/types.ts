@@ -17,6 +17,7 @@ export interface SessionInfo {
   csrf_token?: string;
   user: SessionUser | null;
   onboarding: SessionOnboarding;
+  impersonated?: boolean;
 }
 
 /* ===== Profiles ===== */

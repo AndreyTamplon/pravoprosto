@@ -3,7 +3,7 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { getGameState } from '../../api/client';
-import { Spinner, BrandLogo } from '../ui';
+import { Spinner, BrandLogo, ImpersonationBanner } from '../ui';
 import styles from './StudentLayout.module.css';
 
 export default function StudentLayout() {
@@ -74,6 +74,7 @@ export default function StudentLayout() {
           )}
         </div>
 
+        <ImpersonationBanner />
         <div className={styles.content}>
           <Outlet />
         </div>

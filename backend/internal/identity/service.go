@@ -35,6 +35,7 @@ type SessionView struct {
 	CSRFToken     string     `json:"csrf_token,omitempty"`
 	User          *UserView  `json:"user"`
 	Onboarding    Onboarding `json:"onboarding"`
+	Impersonated  bool       `json:"impersonated,omitempty"`
 }
 
 type UserView struct {
@@ -49,11 +50,12 @@ type Onboarding struct {
 }
 
 type AuthenticatedSession struct {
-	SessionID   string
-	AccountID   string
-	Role        string
-	Status      string
-	CSRFSecret  string
+	SessionID      string
+	AccountID      string
+	Role           string
+	Status         string
+	CSRFSecret     string
+	ImpersonatedBy *string
 	DisplayName string
 }
 
@@ -70,6 +72,12 @@ type CallbackResult struct {
 type StartResult struct {
 	StateCookie *http.Cookie
 	RedirectURL string
+}
+
+type ImpersonateResult struct {
+	ImpersonatedCookie *http.Cookie
+	AdminCookie        *http.Cookie
+	RedirectURL        string
 }
 
 func NewService(db *pgxpool.Pool, cfg platformconfig.Config, providers *ProviderRegistry, logger *slog.Logger) *Service {
@@ -109,6 +117,7 @@ func (s *Service) SessionView(ctx context.Context, r *http.Request) (SessionView
 			RoleSelectionRequired:  session.Role == "unselected",
 			TeacherProfileRequired: session.Role == "teacher" && !teacherProfileComplete(ctx, s.db, session.AccountID),
 		},
+		Impersonated: session.ImpersonatedBy != nil,
 	}, nil
 }
 
@@ -126,7 +135,8 @@ func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (Aut
 	query := `
 		select s.id::text, a.id::text, a.role, a.status, s.csrf_secret,
 		       coalesce(sp.display_name, pp.display_name, tp.display_name, ap.display_name, ''),
-		       (s.revoked_at is null and s.expires_at > now()) as is_active
+		       (s.revoked_at is null and s.expires_at > now()) as is_active,
+		       s.impersonated_by_account_id::text
 		from sessions s
 		join accounts a on a.id = s.account_id
 		left join student_profiles sp on sp.account_id = a.id
@@ -146,6 +156,7 @@ func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (Aut
 		&session.CSRFSecret,
 		&session.DisplayName,
 		&isActive,
+		&session.ImpersonatedBy,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -383,6 +394,128 @@ func (s *Service) BlockUser(ctx context.Context, userID string) error {
 func (s *Service) UnblockUser(ctx context.Context, userID string) error {
 	_, err := s.db.Exec(ctx, `update accounts set status = 'active', updated_at = now() where id = $1`, userID)
 	return err
+}
+
+func (s *Service) ImpersonateUser(ctx context.Context, adminAccountID, targetUserID, adminRawToken string) (ImpersonateResult, error) {
+	if _, err := uuid.Parse(targetUserID); err != nil {
+		return ImpersonateResult{}, ErrUserNotFound
+	}
+
+	var role, status string
+	err := s.db.QueryRow(ctx, `select role, status from accounts where id = $1`, targetUserID).Scan(&role, &status)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return ImpersonateResult{}, ErrUserNotFound
+		}
+		return ImpersonateResult{}, err
+	}
+	if status == "blocked" {
+		return ImpersonateResult{}, ErrAccountBlocked
+	}
+	if role == "admin" {
+		return ImpersonateResult{}, ErrCannotImpersonateAdmin
+	}
+	if role == "unselected" {
+		return ImpersonateResult{}, ErrCannotImpersonateUnselected
+	}
+
+	rawToken, err := randomToken(32)
+	if err != nil {
+		return ImpersonateResult{}, err
+	}
+	csrfSecret, err := randomToken(24)
+	if err != nil {
+		return ImpersonateResult{}, err
+	}
+
+	ttl := s.config.SessionTTL
+	if ttl > 4*time.Hour {
+		ttl = 4 * time.Hour
+	}
+
+	var sessionID string
+	err = s.db.QueryRow(ctx, `
+		insert into sessions(account_id, session_token_hash, csrf_secret, expires_at, impersonated_by_account_id)
+		values ($1, $2, $3, $4, $5)
+		returning id::text
+	`, targetUserID, hashToken(rawToken), csrfSecret, time.Now().Add(ttl), adminAccountID).Scan(&sessionID)
+	if err != nil {
+		return ImpersonateResult{}, err
+	}
+
+	slog.Warn("ADMIN IMPERSONATION",
+		"admin_id", adminAccountID,
+		"target_id", targetUserID,
+		"target_role", role,
+		"session_id", sessionID,
+	)
+
+	var redirectURL string
+	switch role {
+	case "student":
+		redirectURL = "/student/courses"
+	case "parent":
+		redirectURL = "/parent"
+	case "teacher":
+		redirectURL = "/teacher"
+	default:
+		redirectURL = "/"
+	}
+
+	return ImpersonateResult{
+		ImpersonatedCookie: &http.Cookie{
+			Name:     s.config.SessionCookieName,
+			Value:    rawToken,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   s.config.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+			Expires:  time.Now().Add(ttl),
+		},
+		AdminCookie: &http.Cookie{
+			Name:     "pravoprost_admin_session",
+			Value:    adminRawToken,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   s.config.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+			Expires:  time.Now().Add(s.config.SessionTTL),
+		},
+		RedirectURL: redirectURL,
+	}, nil
+}
+
+func (s *Service) StopImpersonation(ctx context.Context, currentRawToken, adminRawToken string) (*http.Cookie, error) {
+	// Revoke the impersonated session
+	_, err := s.db.Exec(ctx, `
+		update sessions set revoked_at = now()
+		where session_token_hash = $1 and revoked_at is null
+	`, hashToken(currentRawToken))
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify admin session is still valid
+	var adminAccountID string
+	err = s.db.QueryRow(ctx, `
+		select account_id::text from sessions
+		where session_token_hash = $1 and revoked_at is null and expires_at > now()
+	`, hashToken(adminRawToken)).Scan(&adminAccountID)
+	if err != nil {
+		return nil, ErrNotImpersonating
+	}
+
+	slog.Info("ADMIN IMPERSONATION ENDED", "admin_id", adminAccountID)
+
+	return &http.Cookie{
+		Name:     s.config.SessionCookieName,
+		Value:    adminRawToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.config.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(s.config.SessionTTL),
+	}, nil
 }
 
 func (s *Service) ListUsers(ctx context.Context, role string, query string) (map[string]any, error) {
@@ -667,7 +800,10 @@ var (
 	ErrUnknownProvider             = fmt.Errorf("unknown_provider")
 	ErrAccountBlocked              = fmt.Errorf("account_blocked")
 	ErrUserNotFound                = fmt.Errorf("user_not_found")
-	ErrForbiddenAdminRoleSelection = fmt.Errorf("forbidden_admin_role_selection")
-	ErrInvalidRoleSelection        = fmt.Errorf("invalid_role_selection")
-	ErrRoleAlreadySet              = fmt.Errorf("role_already_set")
+	ErrForbiddenAdminRoleSelection  = fmt.Errorf("forbidden_admin_role_selection")
+	ErrInvalidRoleSelection         = fmt.Errorf("invalid_role_selection")
+	ErrRoleAlreadySet               = fmt.Errorf("role_already_set")
+	ErrCannotImpersonateAdmin       = fmt.Errorf("cannot_impersonate_admin")
+	ErrCannotImpersonateUnselected  = fmt.Errorf("cannot_impersonate_unselected")
+	ErrNotImpersonating             = fmt.Errorf("not_impersonating")
 )

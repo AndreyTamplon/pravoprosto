@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { BrandLogo } from '../ui';
+import { BrandLogo, ImpersonationBanner } from '../ui';
 import styles from './TeacherLayout.module.css';
 
 export default function TeacherLayout() {
@@ -60,6 +60,7 @@ export default function TeacherLayout() {
           <span style={{ width: 24 }} />
         </div>
 
+        <ImpersonationBanner />
         <div className={styles.content}>
           <Outlet />
         </div>

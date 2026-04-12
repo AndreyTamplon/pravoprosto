@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useApi } from '../../hooks/useApi';
-import { getAdminUsers, blockUser, unblockUser } from '../../api/client';
+import { getAdminUsers, blockUser, unblockUser, impersonateUser } from '../../api/client';
 import { Button, Badge, Spinner, Modal, EmptyState } from '../../components/ui';
 import { formatDate, timeAgo } from '../../utils/format';
 import type { AdminUser, Role } from '../../api/types';
@@ -30,6 +30,7 @@ export default function AdminUsers() {
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [showImpersonateConfirm, setShowImpersonateConfirm] = useState(false);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -64,6 +65,21 @@ export default function AdminUsers() {
       setActionLoading(false);
     }
   }, [reload]);
+
+  const handleImpersonate = useCallback(async (user: AdminUser) => {
+    setActionLoading(true);
+    setActionError('');
+    try {
+      const result = await impersonateUser(user.account_id);
+      window.location.href = result.redirect_url;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Ошибка');
+      setActionLoading(false);
+    }
+  }, []);
+
+  const canImpersonate = (user: AdminUser) =>
+    user.role !== 'admin' && user.role !== 'unselected' && user.status !== 'blocked';
 
   function roleBadge(role: Role) {
     return <Badge color={ROLE_COLORS[role] ?? 'gray'}>{role}</Badge>;
@@ -130,7 +146,7 @@ export default function AdminUsers() {
 
       <Modal
         open={selectedUser !== null}
-        onClose={() => { setSelectedUser(null); setActionError(''); }}
+        onClose={() => { setSelectedUser(null); setActionError(''); setShowImpersonateConfirm(false); }}
         title="Пользователь"
       >
         {selectedUser && (
@@ -170,6 +186,14 @@ export default function AdminUsers() {
             {actionError && <div className={styles.error}>{actionError}</div>}
 
             <div className={styles.detailActions}>
+              {canImpersonate(selectedUser) && !showImpersonateConfirm && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowImpersonateConfirm(true)}
+                >
+                  Войти как этот пользователь
+                </Button>
+              )}
               {selectedUser.status === 'active' ? (
                 <Button
                   variant="danger"
@@ -188,6 +212,21 @@ export default function AdminUsers() {
                 </Button>
               )}
             </div>
+
+            {showImpersonateConfirm && (
+              <div className={styles.confirmSection}>
+                <p style={{ fontWeight: 600, marginBottom: 8 }}>
+                  Вы будете перенаправлены в интерфейс пользователя <b>{selectedUser.display_name}</b> ({selectedUser.role}).
+                  Ваша админ-сессия будет сохранена — вы сможете вернуться через баннер.
+                </p>
+                <div className={styles.detailActions}>
+                  <Button variant="secondary" onClick={() => setShowImpersonateConfirm(false)}>Отмена</Button>
+                  <Button onClick={() => handleImpersonate(selectedUser)} loading={actionLoading}>
+                    Подтвердить
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>

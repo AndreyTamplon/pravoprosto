@@ -129,6 +129,14 @@
   margin-bottom: 20px;
 }
 
+.confirmSection {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--gray-100);
+  border-radius: var(--radius-sm);
+  border: var(--border-thin);
+}
+
 @keyframes screenIn {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }

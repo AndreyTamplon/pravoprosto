@@ -11,3 +11,4 @@ export { Modal } from './Modal';
 export { EmptyState } from './EmptyState';
 export { BrandLogo } from './BrandLogo';
 export { StudentPicker } from './StudentPicker';
+export { ImpersonationBanner } from './ImpersonationBanner';

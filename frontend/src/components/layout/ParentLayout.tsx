@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { BrandLogo } from '../ui';
+import { BrandLogo, ImpersonationBanner } from '../ui';
 import styles from './ParentLayout.module.css';
 
 export default function ParentLayout() {
@@ -59,6 +59,7 @@ export default function ParentLayout() {
           <span style={{ width: 24 }} />
         </div>
 
+        <ImpersonationBanner />
         <div className={styles.content}>
           <Outlet />
         </div>

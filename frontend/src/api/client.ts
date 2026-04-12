@@ -541,6 +541,8 @@ export const getAdminUsers = async (params?: { role?: string; q?: string }): Pro
 export const getAdminUser = (userId: string) => get<import('./types').AdminUser>(`/admin/users/${userId}`);
 export const blockUser = (userId: string) => post<void>(`/admin/users/${userId}/block`);
 export const unblockUser = (userId: string) => post<void>(`/admin/users/${userId}/unblock`);
+export const impersonateUser = (userId: string) => post<{ account_id: string; redirect_url: string; impersonated: boolean }>(`/admin/users/${userId}/impersonate`);
+export const stopImpersonation = () => post<{ stopped: boolean; redirect_url: string }>('/stop-impersonation');
 export const getModerationQueue = async (): Promise<import('./types').PendingReview[]> => {
   const items = await getList<Record<string, unknown>>('/admin/moderation/queue');
   return items.map(r => ({

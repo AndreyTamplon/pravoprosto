@@ -230,6 +230,47 @@ func NewRouter(deps Dependencies) http.Handler {
 			http.Redirect(w, r, result.RedirectURL, http.StatusFound)
 		})
 
+		r.Post("/stop-impersonation", requireAuth(func(w http.ResponseWriter, r *http.Request) {
+			session, _ := sessionFromContext(r.Context())
+			if !secureEquals(r.Header.Get(deps.Config.CSRFHeaderName), session.CSRFSecret) {
+				writeError(w, http.StatusForbidden, "csrf_mismatch", "Invalid CSRF token", nil)
+				return
+			}
+			adminCookie, err := r.Cookie("pravoprost_admin_session")
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "not_impersonating", "Not currently impersonating", nil)
+				return
+			}
+			currentCookie, err := r.Cookie(deps.Config.SessionCookieName)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "missing_session", "Missing session cookie", nil)
+				return
+			}
+			restoreCookie, err := deps.Identity.StopImpersonation(r.Context(), currentCookie.Value, adminCookie.Value)
+			if err != nil {
+				if err == identity.ErrNotImpersonating {
+					writeError(w, http.StatusBadRequest, "not_impersonating", "Admin session expired or invalid", nil)
+					return
+				}
+				writeInternalError(w)
+				return
+			}
+			http.SetCookie(w, restoreCookie)
+			http.SetCookie(w, &http.Cookie{
+				Name:     "pravoprost_admin_session",
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   deps.Config.CookieSecure,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   -1,
+			})
+			writeJSON(w, http.StatusOK, map[string]any{
+				"stopped":      true,
+				"redirect_url": "/admin/users",
+			})
+		}, deps))
+
 		r.Post("/onboarding/role", requireAuth(func(w http.ResponseWriter, r *http.Request) {
 			session, _ := sessionFromContext(r.Context())
 			if !secureEquals(r.Header.Get(deps.Config.CSRFHeaderName), session.CSRFSecret) {
@@ -1440,6 +1481,42 @@ func NewRouter(deps Dependencies) http.Handler {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"account_id": userID,
 					"status":     "active",
+				})
+			}, deps)))
+			ar.Post("/users/{userID}/impersonate", requireRole("admin", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				userID := chi.URLParam(r, "userID")
+				if userID == session.AccountID {
+					writeError(w, http.StatusConflict, "cannot_impersonate_self", "Cannot impersonate self", nil)
+					return
+				}
+				adminCookie, err := r.Cookie(deps.Config.SessionCookieName)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "missing_session", "Missing session cookie", nil)
+					return
+				}
+				result, err := deps.Identity.ImpersonateUser(r.Context(), session.AccountID, userID, adminCookie.Value)
+				if err != nil {
+					switch err {
+					case identity.ErrUserNotFound:
+						writeError(w, http.StatusNotFound, "user_not_found", "User not found", nil)
+					case identity.ErrAccountBlocked:
+						writeError(w, http.StatusConflict, "account_blocked", "Account is blocked", nil)
+					case identity.ErrCannotImpersonateAdmin:
+						writeError(w, http.StatusForbidden, "cannot_impersonate_admin", "Cannot impersonate admin users", nil)
+					case identity.ErrCannotImpersonateUnselected:
+						writeError(w, http.StatusUnprocessableEntity, "cannot_impersonate_unselected", "Cannot impersonate users who have not completed onboarding", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				http.SetCookie(w, result.ImpersonatedCookie)
+				http.SetCookie(w, result.AdminCookie)
+				writeJSON(w, http.StatusOK, map[string]any{
+					"account_id":   userID,
+					"redirect_url": result.RedirectURL,
+					"impersonated": true,
 				})
 			}, deps)))
 		})
