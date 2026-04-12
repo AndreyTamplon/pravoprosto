@@ -769,6 +769,76 @@ func (s *Service) RevokeEntitlement(ctx context.Context, entitlementID string) (
 	return map[string]any{"entitlement_id": entitlementID, "status": "revoked"}, nil
 }
 
+func (s *Service) ListEntitlements(ctx context.Context, studentID, status, targetCourseID string) (map[string]any, error) {
+	rows, err := s.db.Query(ctx, `
+		select e.id::text,
+		       e.student_id::text,
+		       coalesce(sp.display_name, ''),
+		       e.target_type,
+		       e.target_course_id::text,
+		       coalesce(e.target_lesson_id, ''),
+		       coalesce(
+		           (select title from (
+		               select cr.title from course_revisions cr where cr.course_id = e.target_course_id and cr.is_current = true
+		               union all
+		               select (cd.content::jsonb->>'title')::text from course_drafts cd where cd.course_id = e.target_course_id
+		           ) sub limit 1),
+		       ''),
+		       e.source_type,
+		       coalesce(e.order_id::text, ''),
+		       e.status,
+		       e.granted_at::text,
+		       coalesce(e.revoked_at::text, ''),
+		       coalesce(
+		           (select coalesce(sp2.display_name, ap2.display_name, '') from accounts a2
+		            left join student_profiles sp2 on sp2.account_id = a2.id
+		            left join admin_profiles ap2 on ap2.account_id = a2.id
+		            where a2.id = e.granted_by_account_id),
+		       '')
+		from entitlements e
+		left join student_profiles sp on sp.account_id = e.student_id
+		where ($1 = '' or e.student_id::text = $1)
+		  and ($2 = '' or e.status = $2)
+		  and ($3 = '' or e.target_course_id::text = $3)
+		order by e.granted_at desc
+	`, studentID, status, targetCourseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var entitlementID, sID, sName, targetType, targetCourseIDVal, targetLessonID string
+		var courseTitle, sourceType, orderID, statusVal, grantedAt, revokedAt, grantedByName string
+		if err := rows.Scan(&entitlementID, &sID, &sName, &targetType, &targetCourseIDVal, &targetLessonID,
+			&courseTitle, &sourceType, &orderID, &statusVal, &grantedAt, &revokedAt, &grantedByName); err != nil {
+			return nil, err
+		}
+		item := map[string]any{
+			"entitlement_id": entitlementID,
+			"student":        map[string]any{"account_id": sID, "display_name": sName},
+			"target_type":    targetType,
+			"target_course_id": targetCourseIDVal,
+			"course_title":   courseTitle,
+			"source_type":    sourceType,
+			"status":         statusVal,
+			"granted_at":     grantedAt,
+			"granted_by_name": grantedByName,
+		}
+		if targetLessonID != "" {
+			item["target_lesson_id"] = targetLessonID
+		}
+		if orderID != "" {
+			item["order_id"] = orderID
+		}
+		if revokedAt != "" {
+			item["revoked_at"] = revokedAt
+		}
+		items = append(items, item)
+	}
+	return map[string]any{"items": items}, rows.Err()
+}
+
 func (s *Service) existingConfirmResult(ctx context.Context, tx pgx.Tx, orderID string, idempotencyKey string, externalReference string) (map[string]any, error) {
 	var paymentID, entitlementID string
 	err := tx.QueryRow(ctx, `

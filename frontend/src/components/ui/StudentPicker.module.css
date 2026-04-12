@@ -1,0 +1,84 @@
+.wrapper {
+  position: relative;
+}
+
+.label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.88rem;
+  margin-bottom: 6px;
+  color: var(--dark);
+}
+
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color var(--transition);
+  background: var(--white);
+}
+
+.input:focus {
+  border-color: var(--blue);
+}
+
+.selected {
+  font-size: 0.82rem;
+  color: var(--teal-dark);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--white);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-comic);
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.dropdownLoading,
+.dropdownEmpty {
+  padding: 12px 14px;
+  font-size: 0.88rem;
+  color: var(--gray-500);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-family);
+}
+
+.item:hover {
+  background: var(--gray-100);
+}
+
+.itemName {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--dark);
+}
+
+.itemEmail {
+  font-size: 0.82rem;
+  color: var(--gray-500);
+}

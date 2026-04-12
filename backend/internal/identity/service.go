@@ -385,7 +385,7 @@ func (s *Service) UnblockUser(ctx context.Context, userID string) error {
 	return err
 }
 
-func (s *Service) ListUsers(ctx context.Context, role string) (map[string]any, error) {
+func (s *Service) ListUsers(ctx context.Context, role string, query string) (map[string]any, error) {
 	rows, err := s.db.Query(ctx, `
 		select a.id::text,
 		       a.role,
@@ -413,8 +413,10 @@ func (s *Service) ListUsers(ctx context.Context, role string) (map[string]any, e
 		left join admin_profiles ap on ap.account_id = a.id
 		left join student_game_state sgs on sgs.student_id = a.id
 		where ($1 = '' or a.role = $1)
+		  and ($2 = '' or lower(coalesce(sp.display_name, pp.display_name, tp.display_name, ap.display_name, '')) like '%' || lower($2) || '%'
+		       or lower(coalesce(ei.email, '')) like '%' || lower($2) || '%')
 		order by a.created_at desc
-	`, role)
+	`, role, query)
 	if err != nil {
 		return nil, err
 	}

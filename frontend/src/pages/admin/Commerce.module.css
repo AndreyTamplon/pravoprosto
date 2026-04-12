@@ -185,6 +185,96 @@
   text-align: center;
 }
 
+/* Onboarding */
+.onboarding {
+  background: var(--gray-100);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.onboardingHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.onboardingTitle {
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.onboardingSteps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--white);
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 0.86rem;
+  line-height: 1.3;
+}
+
+.stepNumber {
+  width: 24px;
+  height: 24px;
+  background: var(--teal);
+  color: var(--white);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.stepArrow {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--gray-400);
+}
+
+/* Filters */
+.filterBar {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filterItem {
+  min-width: 200px;
+  flex: 1;
+  max-width: 320px;
+}
+
+.clearFilter {
+  font-size: 0.78rem;
+  color: var(--gray-500);
+  cursor: pointer;
+  margin-top: 4px;
+  background: none;
+  border: none;
+  font-family: var(--font-family);
+  padding: 0;
+}
+
+.clearFilter:hover {
+  color: var(--red);
+}
+
 @keyframes screenIn {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }

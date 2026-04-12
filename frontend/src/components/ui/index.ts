@@ -10,3 +10,4 @@ export { Input, Textarea, Select } from './Input';
 export { Modal } from './Modal';
 export { EmptyState } from './EmptyState';
 export { BrandLogo } from './BrandLogo';
+export { StudentPicker } from './StudentPicker';

@@ -161,7 +161,7 @@ export default function ChildProgress() {
       )}
 
       <h2 className={s.sectionTitle} style={{ marginTop: 28 }}>Платные уроки</h2>
-      {loadingPaidOffers && <Spinner text="Загрузка офферов..." />}
+      {loadingPaidOffers && <Spinner text="Загрузка тарифов..." />}
       {paidOffersError && <div className={s.error}>{paidOffersError}</div>}
       {payError && <div className={s.error}>{payError}</div>}
       {!loadingPaidOffers && !paidOffersError && (!paidOffers || paidOffers.length === 0) && (

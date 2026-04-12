@@ -892,6 +892,22 @@ export interface CommercialOrder {
   fulfilled_at?: string;
 }
 
+export interface Entitlement {
+  entitlement_id: string;
+  student_id: string;
+  student_name: string;
+  target_type: 'course' | 'lesson';
+  target_course_id: string;
+  target_lesson_id?: string;
+  course_title: string;
+  source_type: 'purchase' | 'complimentary';
+  order_id?: string;
+  status: 'active' | 'revoked';
+  granted_at: string;
+  revoked_at?: string;
+  granted_by_name: string;
+}
+
 export interface UpdateDraftInput {
   draft_version: number;
   title: string;

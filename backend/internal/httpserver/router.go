@@ -1100,7 +1100,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				writeJSON(w, http.StatusCreated, view)
 			}, deps)))
 			ar.Get("/users", requireRole("admin", deps, func(w http.ResponseWriter, r *http.Request) {
-				view, err := deps.Identity.ListUsers(r.Context(), r.URL.Query().Get("role"))
+				view, err := deps.Identity.ListUsers(r.Context(), r.URL.Query().Get("role"), r.URL.Query().Get("q"))
 				if err != nil {
 					writeInternalError(w)
 					return
@@ -1312,6 +1312,18 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusOK, view)
 			}, deps)))
+			ar.Get("/commerce/entitlements", requireRole("admin", deps, func(w http.ResponseWriter, r *http.Request) {
+				view, err := deps.Commerce.ListEntitlements(r.Context(),
+					r.URL.Query().Get("student_id"),
+					r.URL.Query().Get("status"),
+					r.URL.Query().Get("target_course_id"),
+				)
+				if err != nil {
+					writeInternalError(w)
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}))
 			ar.Post("/commerce/entitlements/grants", requireRole("admin", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 				session, _ := sessionFromContext(r.Context())
 				input, err := commerce.DecodeComplimentaryGrantInput(r)

@@ -525,8 +525,12 @@ export const createModerationPreview = async (
   return normalizePreviewSession(raw);
 };
 export const createAdminAccessGrant = (courseId: string, studentId: string) => post<void>(`/admin/courses/${courseId}/access-grants`, { student_id: studentId });
-export const getAdminUsers = async (params?: { role?: string }): Promise<import('./types').AdminUser[]> => {
-  const items = await getList<Record<string, unknown>>(`/admin/users${params?.role ? `?role=${params.role}` : ''}`);
+export const getAdminUsers = async (params?: { role?: string; q?: string }): Promise<import('./types').AdminUser[]> => {
+  const qs = new URLSearchParams();
+  if (params?.role) qs.set('role', params.role);
+  if (params?.q) qs.set('q', params.q);
+  const suffix = qs.toString() ? `?${qs}` : '';
+  const items = await getList<Record<string, unknown>>(`/admin/users${suffix}`);
   return items.map(u => ({
     ...u,
     created_at: (u.created_at ?? u.registered_at ?? '') as string,
@@ -611,6 +615,36 @@ export const confirmPayment = (orderId: string, data: Record<string, unknown>, i
   post<void>(`/admin/commerce/orders/${orderId}/payments/manual-confirm`, data, { 'Idempotency-Key': idempotencyKey });
 export const grantEntitlement = (data: Record<string, unknown>) => post<void>('/admin/commerce/entitlements/grants', data);
 export const revokeEntitlement = (entitlementId: string) => post<void>(`/admin/commerce/entitlements/${entitlementId}/revoke`);
+export const getEntitlements = async (params?: {
+  student_id?: string;
+  status?: string;
+  target_course_id?: string;
+}): Promise<import('./types').Entitlement[]> => {
+  const qs = new URLSearchParams();
+  if (params?.student_id) qs.set('student_id', params.student_id);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.target_course_id) qs.set('target_course_id', params.target_course_id);
+  const suffix = qs.toString() ? `?${qs}` : '';
+  const items = await getList<Record<string, unknown>>(`/admin/commerce/entitlements${suffix}`);
+  return items.map(e => {
+    const student = (e.student ?? {}) as Record<string, unknown>;
+    return {
+      entitlement_id: (e.entitlement_id ?? '') as string,
+      student_id: (student.account_id ?? '') as string,
+      student_name: (student.display_name ?? '') as string,
+      target_type: (e.target_type ?? 'course') as 'course' | 'lesson',
+      target_course_id: (e.target_course_id ?? '') as string,
+      target_lesson_id: (e.target_lesson_id as string) ?? undefined,
+      course_title: (e.course_title ?? '') as string,
+      source_type: (e.source_type ?? 'complimentary') as 'purchase' | 'complimentary',
+      order_id: (e.order_id as string) ?? undefined,
+      status: (e.status ?? 'active') as 'active' | 'revoked',
+      granted_at: (e.granted_at ?? '') as string,
+      revoked_at: (e.revoked_at as string) ?? undefined,
+      granted_by_name: (e.granted_by_name ?? '') as string,
+    };
+  });
+};
 export const getAdminProfile = () => get<import('./types').AdminProfile>('/admin/profile');
 export const updateAdminProfile = (data: { display_name: string }) => put<import('./types').AdminProfile>('/admin/profile', data);
 
