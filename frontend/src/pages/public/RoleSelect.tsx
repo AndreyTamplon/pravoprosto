@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { ComicPanel } from '../../components/ui';
+import { ComicPanel, BrandLogo } from '../../components/ui';
 import type { Role } from '../../api/types';
 import styles from './RoleSelect.module.css';
 
@@ -70,6 +70,7 @@ export default function RoleSelect() {
   return (
     <div className={styles.page}>
       <div className={`${styles.wrap} ${selecting ? styles.selecting : ''}`}>
+        <BrandLogo size="md" className={styles.brand} />
         <h1 className={styles.title}>Кто вы?</h1>
         <p className={styles.sub}>Выберите свою роль, чтобы продолжить</p>
 

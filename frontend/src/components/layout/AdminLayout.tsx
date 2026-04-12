@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { BrandLogo } from '../ui';
 import styles from './AdminLayout.module.css';
 
 export default function AdminLayout() {
@@ -71,7 +72,9 @@ export default function AdminLayout() {
     <div className={styles.layout}>
       {/* Desktop sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <div className={styles.roleBadge}>Администратор</div>
         <nav className={styles.nav}>{navItems}</nav>
         <button className={styles.logoutBtn} onClick={logout} type="button">
@@ -90,7 +93,7 @@ export default function AdminLayout() {
           >
             ☰
           </button>
-          <span>Право Просто</span>
+          <span>SmartGo School</span>
           <span style={{ width: 24 }} />
         </div>
 
@@ -117,7 +120,9 @@ export default function AdminLayout() {
         >
           ✕
         </button>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <div className={styles.roleBadge}>Администратор</div>
         <nav className={styles.nav}>{navItems}</nav>
         <button className={styles.logoutBtn} onClick={logout} type="button">

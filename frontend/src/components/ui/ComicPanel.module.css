@@ -2,11 +2,11 @@
   background: var(--white);
   border: var(--border-thick);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-comic);
+  box-shadow: var(--shadow-comic-sm);
   padding: 24px;
   position: relative;
   overflow: hidden;
-  transition: transform var(--transition), box-shadow var(--transition);
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
 }
 
 .noPad { padding: 0; }
@@ -16,28 +16,29 @@
 }
 
 .clickable:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-comic-lg);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-comic);
+  border-color: #b7cce8;
 }
 
 .clickable:active {
   transform: translateY(1px);
-  box-shadow: var(--shadow-comic-sm);
+  box-shadow: var(--shadow-comic-xs);
 }
 
 .flat {
   box-shadow: none;
-  border-width: 2px;
+  border-width: 1px;
 }
 
 .panelSm {
   padding: 14px;
-  border-width: 3px;
-  box-shadow: var(--shadow-comic-sm);
+  border-width: 1px;
+  box-shadow: var(--shadow-comic-xs);
 }
 
-.accentTeal { border-left: 5px solid var(--teal); }
-.accentOrange { border-left: 5px solid var(--orange); }
-.accentBlue { border-left: 5px solid var(--blue); }
-.accentPink { border-left: 5px solid var(--pink); }
-.accentLime { border-left: 5px solid var(--lime); }
+.accentTeal { border-left: 4px solid var(--teal); }
+.accentOrange { border-left: 4px solid var(--orange); }
+.accentBlue { border-left: 4px solid var(--blue); }
+.accentPink { border-left: 4px solid var(--pink); }
+.accentLime { border-left: 4px solid var(--lime); }

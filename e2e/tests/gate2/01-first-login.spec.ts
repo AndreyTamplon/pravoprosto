@@ -10,8 +10,8 @@ test.describe('Gate 2 -- First login flow (new user)', () => {
     await page.goto('/');
 
     // 2. Verify the landing page renders
-    // Landing.tsx: <h1><span>Право Просто</span> — учись защищать себя через игру!</h1>
-    await expect(page.getByText('Право Просто').first()).toBeVisible({ timeout: 10000 });
+    // Landing.tsx: <h1><span>SmartGo School</span> — обучение, которое действительно увлекает</h1>
+    await expect(page.getByText('SmartGo School').first()).toBeVisible({ timeout: 10000 });
     const ctaButton = page.getByRole('button', { name: 'Начать' });
     await expect(ctaButton).toBeVisible();
 

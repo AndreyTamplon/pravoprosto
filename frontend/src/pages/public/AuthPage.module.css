@@ -4,48 +4,41 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--bg);
+  background: linear-gradient(180deg, #f5faff 0%, #f8fcf7 100%);
 }
 
 .card {
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   text-align: center;
-  padding: 48px 36px;
-}
-
-.mascot {
-  font-size: 4rem;
-  margin-bottom: 8px;
-  display: block;
+  padding: 42px 34px;
 }
 
 .logo {
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: var(--teal);
-  margin-bottom: 8px;
+  margin: 0 auto 14px;
+  width: 172px;
 }
 
 .sub {
-  font-size: 0.95rem;
+  font-size: 0.96rem;
   color: var(--dark-light);
-  margin-bottom: 32px;
-  line-height: 1.5;
+  margin-bottom: 30px;
+  line-height: 1.6;
 }
 
 .yandexBtn {
-  background: var(--orange);
+  background: linear-gradient(135deg, var(--blue), var(--blue-dark));
   color: var(--white);
+  font-family: var(--font-family-heading);
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 800;
   padding: 14px 28px;
   border: var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-comic);
   cursor: pointer;
   width: 100%;
-  transition: transform var(--transition), box-shadow var(--transition);
+  transition: transform var(--transition), box-shadow var(--transition), filter var(--transition);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -53,19 +46,19 @@
 }
 
 .yandexBtn:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-comic-lg);
-  background: var(--orange-dark);
+  filter: brightness(1.05);
 }
 
 .yandexBtn:active {
-  transform: translateY(2px);
+  transform: translateY(1px);
   box-shadow: var(--shadow-comic-xs);
 }
 
 .hint {
-  margin-top: 24px;
-  font-size: 0.85rem;
+  margin-top: 22px;
+  font-size: 0.84rem;
   color: var(--gray-500);
   line-height: 1.5;
 }

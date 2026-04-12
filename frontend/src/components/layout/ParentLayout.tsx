@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { BrandLogo } from '../ui';
 import styles from './ParentLayout.module.css';
 
 export default function ParentLayout() {
@@ -34,7 +35,9 @@ export default function ParentLayout() {
     <div className={styles.layout}>
       {/* Desktop sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <nav className={styles.nav}>{navItems}</nav>
         <button className={styles.logoutBtn} onClick={logout} type="button">
           Выйти
@@ -52,7 +55,7 @@ export default function ParentLayout() {
           >
             ☰
           </button>
-          <span>Право Просто</span>
+          <span>SmartGo School</span>
           <span style={{ width: 24 }} />
         </div>
 

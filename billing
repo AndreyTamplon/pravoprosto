@@ -1,0 +1,37 @@
+# PostgreSQL
+POSTGRES_PASSWORD=change_me_to_a_strong_random_password
+
+# Application base URL (e.g. https://pravoprost.example.com)
+BASE_URL=https://smartgoschool.ru
+
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=json
+LOG_ADD_SOURCE=false
+
+# Signing secret for JWT/session tokens (generate with: openssl rand -hex 32)
+SIGNING_SECRET=change_me_generate_with_openssl_rand_hex_32
+
+# LLM provider settings
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-your-api-key-here
+LLM_MODEL=gpt-4o
+
+# Yandex OAuth credentials (from https://oauth.yandex.ru/)
+YANDEX_CLIENT_ID=your_yandex_client_id
+YANDEX_CLIENT_SECRET=your_yandex_client_secret
+
+# T-Bank acquiring (real billing)
+TBANK_TERMINAL_KEY=1775049027183DEMO
+TBANK_PASSWORD=1sb3E$$fUrz!w&EZ_
+TBANK_API_BASE_URL=https://securepay.tinkoff.ru
+TBANK_NOTIFICATION_PATH=/api/payment/webhook
+TBANK_SUCCESS_URL=https://smartgoschool.ru/success
+TBANK_FAIL_URL=https://smartgoschool.ru/fail
+TBANK_PENDING_TTL_MINUTES=60
+# Fiscalization (receipt) settings, update Taxation with your legal mode from T-Bank
+TBANK_RECEIPT_ENABLED=true
+TBANK_RECEIPT_TAXATION=osn
+TBANK_RECEIPT_TAX=none
+TBANK_RECEIPT_PAYMENT_METHOD=full_payment
+TBANK_RECEIPT_PAYMENT_OBJECT=service

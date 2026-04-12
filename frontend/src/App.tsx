@@ -244,10 +244,10 @@ export default function App() {
                 <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>404</h1>
                 <p>Страница не найдена</p>
                 <a href="/" style={{
-                  background: 'var(--orange)', color: 'white', padding: '12px 24px',
-                  borderRadius: '12px', border: '3px solid var(--dark)',
-                  boxShadow: '5px 5px 0 var(--dark)', fontWeight: 700,
-                  textDecoration: 'none', textTransform: 'uppercase',
+                  background: 'var(--blue)', color: 'white', padding: '12px 24px',
+                  borderRadius: '12px', border: 'var(--border)',
+                  boxShadow: 'var(--shadow-comic)', fontWeight: 700,
+                  textDecoration: 'none',
                 }}>На главную</a>
               </div>
             } />

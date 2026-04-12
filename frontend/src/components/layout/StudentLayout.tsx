@@ -3,7 +3,7 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { getGameState } from '../../api/client';
-import { Spinner } from '../ui/Spinner';
+import { Spinner, BrandLogo } from '../ui';
 import styles from './StudentLayout.module.css';
 
 export default function StudentLayout() {
@@ -38,7 +38,9 @@ export default function StudentLayout() {
     <div className={styles.layout}>
       {/* Desktop left sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>Право Просто</div>
+        <div className={styles.logo}>
+          <BrandLogo size="sm" className={styles.logoImage} />
+        </div>
         <nav className={styles.nav}>{navItems}</nav>
         <button className={styles.logoutBtn} onClick={logout} type="button">
           Выйти
@@ -57,7 +59,7 @@ export default function StudentLayout() {
           >
             ☰
           </button>
-          <span style={{ fontWeight: 800, fontSize: '1rem' }}>Право Просто</span>
+          <span style={{ fontWeight: 800, fontSize: '1rem' }}>SmartGo School</span>
           {game ? (
             <div className={styles.mobileStats}>
               <span className={`${styles.mobileStat} ${styles.mobileStatXp}`}>

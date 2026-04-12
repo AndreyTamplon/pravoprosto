@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Право Просто — Full E2E test runner (stdlib only)."""
+"""SmartGo School — Full E2E test runner (stdlib only)."""
 
 import http.cookiejar
 import json

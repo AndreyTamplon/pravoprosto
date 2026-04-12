@@ -9,3 +9,4 @@ export { Spinner } from './Spinner';
 export { Input, Textarea, Select } from './Input';
 export { Modal } from './Modal';
 export { EmptyState } from './EmptyState';
+export { BrandLogo } from './BrandLogo';

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright configuration for "Право Просто" E2E tests.
+ * Playwright configuration for "SmartGo School" E2E tests.
  *
  * Uses non-standard ports to avoid conflicts with Docker containers.
  *   mockserver: 3091 (SSO) / 3090 (LLM)
