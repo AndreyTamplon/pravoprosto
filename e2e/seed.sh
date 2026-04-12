@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Право Просто — E2E seed script
+# SmartGo School — E2E seed script
 #
 # Seeds the backend with test data for manual e2e testing.
 # Prerequisites:

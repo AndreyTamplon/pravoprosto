@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -462,7 +464,7 @@ func (s *Service) ProcessTBankNotification(ctx context.Context, payload map[stri
 		return tx.Commit(ctx)
 	}
 
-	if amountMinor > 0 && amountMinor != order.AmountMinor {
+	if amountMinor != order.AmountMinor {
 		if _, err := tx.Exec(ctx, `
 			update tbank_payment_sessions
 			set status = 'mismatch', updated_at = now(), last_notification_json = $2
@@ -485,6 +487,14 @@ func (s *Service) ProcessTBankNotification(ctx context.Context, payload map[stri
 	}
 
 	if order.Status != "awaiting_confirmation" {
+		if order.Status == "canceled" {
+			slog.Error("PAYMENT ALERT: confirmed webhook received for canceled order — money charged but entitlement NOT granted, manual reconciliation required",
+				"order_id", order.ID,
+				"payment_id", paymentID,
+				"order_status", order.Status,
+				"amount_minor", amountMinor,
+			)
+		}
 		return tx.Commit(ctx)
 	}
 
@@ -609,7 +619,9 @@ func (s *Service) initTBankPayment(ctx context.Context, orderID string, amountMi
 		"PayType":         payload.PayType,
 	})
 
-	initReqJSON := mustJSON(payload)
+	payloadForStorage := payload
+	payloadForStorage.Token = ""
+	initReqJSON := mustJSON(payloadForStorage)
 
 	endpoint := strings.TrimRight(s.tbankAPIBaseURL, "/") + "/v2/Init"
 	body, err := json.Marshal(payload)
@@ -763,7 +775,12 @@ func (s *Service) tbankEnabled() bool {
 
 func (s *Service) verifyTBankToken(payload map[string]any, token string) bool {
 	expected := s.signTBankAnyValues(payload)
-	return strings.EqualFold(expected, strings.TrimSpace(token))
+	a := []byte(strings.ToLower(expected))
+	b := []byte(strings.ToLower(strings.TrimSpace(token)))
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(a, b) == 1
 }
 
 func (s *Service) signTBankAnyValues(values map[string]any) string {

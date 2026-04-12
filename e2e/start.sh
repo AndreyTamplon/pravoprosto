@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Право Просто — Start all services for E2E testing
+# SmartGo School — Start all services for E2E testing
 #
 # Creates a fresh database, starts mock servers and backend.
 # Press Ctrl+C to stop everything.

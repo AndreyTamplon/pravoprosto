@@ -11,6 +11,8 @@ const AuthPage = lazy(() => import('./pages/public/AuthPage'));
 const RoleSelect = lazy(() => import('./pages/public/RoleSelect'));
 const StudentOnboarding = lazy(() => import('./pages/public/StudentOnboarding'));
 const TeacherOnboarding = lazy(() => import('./pages/public/TeacherOnboarding'));
+const PaymentSuccess = lazy(() => import('./pages/public/PaymentSuccess'));
+const PaymentFail = lazy(() => import('./pages/public/PaymentFail'));
 
 // Student
 const StudentCatalog = lazy(() => import('./pages/student/Catalog'));
@@ -227,6 +229,10 @@ export default function App() {
               <RequireRole role="admin"><PreviewPlayer /></RequireRole>
             } />
 
+            {/* Payment result pages (T-Bank redirects here after checkout) */}
+            <Route path="/success" element={<PaymentSuccess />} />
+            <Route path="/fail" element={<PaymentFail />} />
+
             {/* 404 */}
             <Route path="*" element={
               <div style={{
@@ -238,10 +244,10 @@ export default function App() {
                 <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>404</h1>
                 <p>Страница не найдена</p>
                 <a href="/" style={{
-                  background: 'var(--orange)', color: 'white', padding: '12px 24px',
-                  borderRadius: '12px', border: '3px solid var(--dark)',
-                  boxShadow: '5px 5px 0 var(--dark)', fontWeight: 700,
-                  textDecoration: 'none', textTransform: 'uppercase',
+                  background: 'var(--blue)', color: 'white', padding: '12px 24px',
+                  borderRadius: '12px', border: 'var(--border)',
+                  boxShadow: 'var(--shadow-comic)', fontWeight: 700,
+                  textDecoration: 'none',
                 }}>На главную</a>
               </div>
             } />

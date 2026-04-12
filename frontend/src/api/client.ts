@@ -57,6 +57,9 @@ function translateApiMessage(status: number, code: string, message: string): str
   if (code === 'forbidden') {
     return 'Недостаточно прав для этого действия.';
   }
+  if (code === 'out_of_hearts') {
+    return 'Жизни закончились. Подождите восстановления.';
+  }
   if (status >= 500 && message === 'Internal server error') {
     return 'Внутренняя ошибка сервера.';
   }
