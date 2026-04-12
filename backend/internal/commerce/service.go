@@ -781,7 +781,7 @@ func (s *Service) ListEntitlements(ctx context.Context, studentID, status, targe
 		           (select title from (
 		               select cr.title from course_revisions cr where cr.course_id = e.target_course_id and cr.is_current = true
 		               union all
-		               select (cd.content::jsonb->>'title')::text from course_drafts cd where cd.course_id = e.target_course_id
+		               select cd.title from course_drafts cd where cd.course_id = e.target_course_id
 		           ) sub limit 1),
 		       ''),
 		       e.source_type,
