@@ -497,12 +497,20 @@ export const createAdminCourse = (data: { title: string; description: string }) 
 export const getAdminDraft = async (courseId: string): Promise<import('./types').CourseDraft> => {
   const raw = await get<Record<string, unknown>>(`/admin/courses/${courseId}/draft`);
   const content = (raw.content_json ?? raw.content ?? { modules: [] }) as import('./types').CourseContent;
-  return { ...raw, content_json: content } as import('./types').CourseDraft;
+  return {
+    ...raw,
+    content_json: content,
+    has_published_revision: !!(raw.has_published_revision ?? raw.last_published_revision_id),
+  } as import('./types').CourseDraft;
 };
 export const getModerationReviewDraft = async (reviewId: string): Promise<import('./types').CourseDraft> => {
   const raw = await get<Record<string, unknown>>(`/admin/moderation/reviews/${reviewId}/draft`);
   const content = (raw.content_json ?? raw.content ?? { modules: [] }) as import('./types').CourseContent;
-  return { ...raw, content_json: content } as import('./types').CourseDraft;
+  return {
+    ...raw,
+    content_json: content,
+    has_published_revision: !!(raw.has_published_revision ?? raw.last_published_revision_id),
+  } as import('./types').CourseDraft;
 };
 export const updateAdminDraft = (courseId: string, data: import('./types').UpdateDraftInput) =>
   put<{ draft_version: number }>(`/admin/courses/${courseId}/draft`, buildDraftBody(data));

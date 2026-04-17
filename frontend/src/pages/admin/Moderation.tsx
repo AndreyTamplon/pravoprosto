@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import {
@@ -104,19 +104,20 @@ export default function Moderation() {
     }
   }, [rejectComment, reload]);
 
-  const [previewing, setPreviewing] = useState(false);
+  const previewingRef = useRef(false);
   const handlePreview = useCallback(async (review: PendingReview) => {
     if (!previewLessonId) {
       setActionError('Выберите урок для предпросмотра');
       return;
     }
-    if (previewing) return;
+    if (previewingRef.current) return;
+    previewingRef.current = true;
     const win = window.open('about:blank', '_blank');
     if (!win) {
+      previewingRef.current = false;
       setActionError('Разрешите всплывающие окна для предпросмотра');
       return;
     }
-    setPreviewing(true);
     try {
       const session = await createModerationPreview(review.review_id, previewLessonId, location.pathname);
       win.location.href = `/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`;
@@ -124,9 +125,9 @@ export default function Moderation() {
       win.close();
       setActionError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
     } finally {
-      setPreviewing(false);
+      previewingRef.current = false;
     }
-  }, [location.pathname, previewLessonId, previewing]);
+  }, [location.pathname, previewLessonId]);
 
   if (loading) return <Spinner />;
 

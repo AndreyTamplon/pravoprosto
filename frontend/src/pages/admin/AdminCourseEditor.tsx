@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import {
@@ -67,6 +67,7 @@ export default function AdminCourseEditor() {
 
   // Preview
   const [previewing, setPreviewing] = useState(false);
+  const previewingRef = useRef(false);
 
   // Delete
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -151,9 +152,11 @@ export default function AdminCourseEditor() {
   }, [courseId, handleSave, reload]);
 
   const handlePreview = useCallback(async (lessonId: string) => {
-    if (!courseId || previewing) return;
+    if (!courseId || previewingRef.current) return;
+    previewingRef.current = true;
     const win = window.open('about:blank', '_blank');
     if (!win) {
+      previewingRef.current = false;
       setSaveError('Разрешите всплывающие окна для предпросмотра');
       return;
     }
@@ -170,9 +173,10 @@ export default function AdminCourseEditor() {
       setValidationErrors(details);
       setSaveError(details.length > 0 ? '' : message);
     } finally {
+      previewingRef.current = false;
       setPreviewing(false);
     }
-  }, [courseId, handleSave, location.pathname, previewing]);
+  }, [courseId, handleSave, location.pathname]);
 
   const handleDelete = useCallback(async () => {
     if (!courseId) return;

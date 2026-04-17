@@ -513,6 +513,13 @@ func (s *Service) AdminArchiveCourse(ctx context.Context, courseID string) (map[
 	`, courseID); err != nil {
 		return nil, err
 	}
+	if _, err := tx.Exec(ctx, `
+		update commercial_offers
+		set status = 'archived', archived_at = now(), updated_at = now()
+		where target_course_id = $1 and status <> 'archived'
+	`, courseID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { getAdminDraft, updateAdminDraft, createAdminPreview } from '../../api/client';
@@ -485,11 +485,14 @@ export default function AdminLessonEditor() {
     }
   }, [courseId, draft, draftVersion, graph, lessonId, lessonTitle, moduleId]);
 
-  const [previewing, setPreviewing] = useState(false);
+  const [, setPreviewing] = useState(false);
+  const previewingRef = useRef(false);
   const handlePreview = useCallback(async () => {
-    if (!courseId || !lessonId || previewing) return;
+    if (!courseId || !lessonId || previewingRef.current) return;
+    previewingRef.current = true;
     const win = window.open('about:blank', '_blank');
     if (!win) {
+      previewingRef.current = false;
       setSaveError('Разрешите всплывающие окна для предпросмотра');
       return;
     }
@@ -506,9 +509,10 @@ export default function AdminLessonEditor() {
       setValidationErrors(details);
       setSaveError(details.length > 0 ? '' : message);
     } finally {
+      previewingRef.current = false;
       setPreviewing(false);
     }
-  }, [courseId, handleSave, lessonId, location.pathname, previewing]);
+  }, [courseId, handleSave, lessonId, location.pathname]);
 
   if (loading) return <Spinner />;
   if (error) return <div className={styles.page}><div className={styles.error}>{error}</div></div>;
