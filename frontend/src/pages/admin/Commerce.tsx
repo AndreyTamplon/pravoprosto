@@ -105,7 +105,10 @@ function OffersTab() {
       });
       setShowEdit(null); reload();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Ошибка');
+      const raw = err instanceof Error ? err.message : 'Ошибка';
+      setFormError(raw === 'Invalid offer target'
+        ? 'Целевой курс недоступен (удалён, архивирован или не опубликован)'
+        : raw);
     } finally { setFormLoading(false); }
   }
 

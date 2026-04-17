@@ -151,14 +151,20 @@ export default function AdminCourseEditor() {
   }, [courseId, handleSave, reload]);
 
   const handlePreview = useCallback(async (lessonId: string) => {
-    if (!courseId) return;
+    if (!courseId || previewing) return;
+    const win = window.open('about:blank', '_blank');
+    if (!win) {
+      setSaveError('Разрешите всплывающие окна для предпросмотра');
+      return;
+    }
     setPreviewing(true);
     setValidationErrors([]);
     try {
       await handleSave();
       const session = await createAdminPreview(courseId, lessonId, location.pathname);
-      window.open(`/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`, '_blank');
+      win.location.href = `/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`;
     } catch (err) {
+      win.close();
       const message = err instanceof Error ? err.message : 'Ошибка предпросмотра';
       const details = getDraftValidationErrors(err).map(item => item.message);
       setValidationErrors(details);
@@ -166,7 +172,7 @@ export default function AdminCourseEditor() {
     } finally {
       setPreviewing(false);
     }
-  }, [courseId, handleSave, location.pathname]);
+  }, [courseId, handleSave, location.pathname, previewing]);
 
   const handleDelete = useCallback(async () => {
     if (!courseId) return;
@@ -241,6 +247,31 @@ export default function AdminCourseEditor() {
     ));
   }
 
+  function moveModule(moduleId: string, delta: -1 | 1) {
+    setLocalModules(prev => {
+      const idx = prev.findIndex(m => m.id === moduleId);
+      if (idx < 0) return prev;
+      const target = idx + delta;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  }
+
+  function moveLesson(moduleId: string, lessonId: string, delta: -1 | 1) {
+    setLocalModules(prev => prev.map(m => {
+      if (m.id !== moduleId) return m;
+      const idx = m.lessons.findIndex(l => l.id === lessonId);
+      if (idx < 0) return m;
+      const target = idx + delta;
+      if (target < 0 || target >= m.lessons.length) return m;
+      const lessons = [...m.lessons];
+      [lessons[idx], lessons[target]] = [lessons[target], lessons[idx]];
+      return { ...m, lessons };
+    }));
+  }
+
   if (loading) return <Spinner />;
   if (error) return <div className={styles.page}><div className={styles.error}>{error}</div></div>;
   if (!draft) return <div className={styles.page}><EmptyState icon="📄" title="Черновик не найден" /></div>;
@@ -252,9 +283,15 @@ export default function AdminCourseEditor() {
           <button className={styles.backBtn} onClick={() => navigate('/admin/courses')}>&#8592;</button>
           <h1 className={styles.title}>{localTitle || 'Новый курс'}</h1>
           <span className={styles.statusBadge}>
-            {draft.workflow_status === 'editing' && <Badge color="yellow">Черновик</Badge>}
-            {draft.workflow_status === 'in_review' && <Badge color="orange">На модерации</Badge>}
-            {draft.workflow_status === 'archived' && <Badge color="gray">Архив</Badge>}
+            {draft.workflow_status === 'archived' ? (
+              <Badge color="gray">Архив</Badge>
+            ) : draft.workflow_status === 'in_review' ? (
+              <Badge color="orange">На модерации</Badge>
+            ) : draft.has_published_revision ? (
+              <Badge color="lime">Опубликован</Badge>
+            ) : (
+              <Badge color="yellow">Черновик</Badge>
+            )}
           </span>
         </div>
         <div className={styles.headerActions}>
@@ -305,11 +342,13 @@ export default function AdminCourseEditor() {
           <EmptyState icon="📦" title="Нет модулей" description="Добавьте первый модуль для курса" />
         )}
 
-        {localModules.map(mod => (
+        {localModules.map((mod, mIdx) => (
           <div key={mod.id} className={styles.moduleCard}>
             <div className={styles.moduleHeader}>
               <span className={styles.moduleTitle}>{mod.title}</span>
               <div className={styles.moduleActions}>
+                <Button size="sm" variant="ghost" onClick={() => moveModule(mod.id, -1)} disabled={mIdx === 0} aria-label="Вверх">↑</Button>
+                <Button size="sm" variant="ghost" onClick={() => moveModule(mod.id, 1)} disabled={mIdx === localModules.length - 1} aria-label="Вниз">↓</Button>
                 <Button size="sm" variant="ghost" onClick={() => { setShowRenameModule(mod.id); setRenameModuleTitle(mod.title); }}>
                   Переименовать
                 </Button>
@@ -332,10 +371,12 @@ export default function AdminCourseEditor() {
                       <div className={styles.lessonMeta}>{lesson.graph.nodes.length} нод</div>
                     </div>
                     <div className={styles.moduleActions}>
+                      <Button size="sm" variant="ghost" onClick={() => moveLesson(mod.id, lesson.id, -1)} disabled={idx === 0} aria-label="Вверх">↑</Button>
+                      <Button size="sm" variant="ghost" onClick={() => moveLesson(mod.id, lesson.id, 1)} disabled={idx === mod.lessons.length - 1} aria-label="Вниз">↓</Button>
                       <Button size="sm" variant="ghost" onClick={() => { void handleEditLesson(lesson.id); }}>
                         Редактировать
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handlePreview(lesson.id)} loading={previewing}>
+                      <Button size="sm" variant="ghost" onClick={() => handlePreview(lesson.id)} disabled={previewing}>
                         Превью
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => deleteLesson(mod.id, lesson.id)}>

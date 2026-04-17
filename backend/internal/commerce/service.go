@@ -259,20 +259,20 @@ func (s *Service) UpdateOffer(ctx context.Context, offerID string, input UpdateO
 	}
 	defer tx.Rollback(ctx)
 
-	var targetType, targetCourseID string
+	var currentStatus, targetType, targetCourseID string
 	var targetLessonID *string
 	if err := tx.QueryRow(ctx, `
-		select target_type, target_course_id::text, target_lesson_id
+		select status, target_type, target_course_id::text, target_lesson_id
 		from commercial_offers
 		where id = $1
 		for update
-	`, offerID).Scan(&targetType, &targetCourseID, &targetLessonID); err != nil {
+	`, offerID).Scan(&currentStatus, &targetType, &targetCourseID, &targetLessonID); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrOfferNotFound
 		}
 		return nil, err
 	}
-	if input.Status == "active" {
+	if input.Status == "active" && currentStatus != "active" {
 		if err := s.validateOfferTargetTx(ctx, tx, targetType, targetCourseID, targetLessonID); err != nil {
 			return nil, err
 		}

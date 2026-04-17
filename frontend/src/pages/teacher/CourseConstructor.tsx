@@ -222,6 +222,24 @@ export default function CourseConstructor() {
     setExpanded(prev => ({ ...prev, [modId]: !prev[modId] }));
   };
 
+  const moveModuleUp = (modIdx: number) => {
+    if (modIdx <= 0) return;
+    setModules(prev => {
+      const arr = [...prev];
+      [arr[modIdx - 1], arr[modIdx]] = [arr[modIdx], arr[modIdx - 1]];
+      return arr;
+    });
+  };
+
+  const moveModuleDown = (modIdx: number) => {
+    setModules(prev => {
+      if (modIdx >= prev.length - 1) return prev;
+      const arr = [...prev];
+      [arr[modIdx], arr[modIdx + 1]] = [arr[modIdx + 1], arr[modIdx]];
+      return arr;
+    });
+  };
+
   // Lesson operations within a module
   const addLesson = (modId: string) => {
     setModules(
@@ -300,7 +318,9 @@ export default function CourseConstructor() {
   if (loadError) return <div className={s.error}>{loadError}</div>;
   if (!draft) return null;
 
-  const ws = workflowBadge[draft.workflow_status] ?? workflowBadge.editing;
+  const ws = draft.workflow_status === 'editing' && draft.has_published_revision
+    ? workflowBadge.published
+    : (workflowBadge[draft.workflow_status] ?? workflowBadge.editing);
   const isEditable = draft.workflow_status === 'editing' || draft.workflow_status === 'changes_requested';
   const activeLinks = accessLinks?.filter(l => l.status === 'active') ?? [];
 
@@ -477,13 +497,35 @@ export default function CourseConstructor() {
                       {mod.lessons.length} этап{mod.lessons.length === 1 ? '' : 'ов'}
                     </span>
                     {isEditable && (
-                      <button
-                        className={s.deleteBtn}
-                        onClick={e => { e.stopPropagation(); removeModule(mod.id); }}
-                        title="Удалить модуль"
-                      >
-                        &times;
-                      </button>
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={e => { e.stopPropagation(); moveModuleUp(modIdx); }}
+                          disabled={modIdx === 0}
+                          style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                          aria-label="Вверх"
+                        >
+                          &uarr;
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={e => { e.stopPropagation(); moveModuleDown(modIdx); }}
+                          disabled={modIdx === modules.length - 1}
+                          style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                          aria-label="Вниз"
+                        >
+                          &darr;
+                        </Button>
+                        <button
+                          className={s.deleteBtn}
+                          onClick={e => { e.stopPropagation(); removeModule(mod.id); }}
+                          title="Удалить модуль"
+                        >
+                          &times;
+                        </button>
+                      </>
                     )}
                     <span className={`${s.expandIcon} ${isOpen ? s.expandIconOpen : ''}`}>
                       &#9654;

@@ -485,23 +485,30 @@ export default function AdminLessonEditor() {
     }
   }, [courseId, draft, draftVersion, graph, lessonId, lessonTitle, moduleId]);
 
+  const [previewing, setPreviewing] = useState(false);
   const handlePreview = useCallback(async () => {
-    if (!courseId || !lessonId) return;
+    if (!courseId || !lessonId || previewing) return;
+    const win = window.open('about:blank', '_blank');
+    if (!win) {
+      setSaveError('Разрешите всплывающие окна для предпросмотра');
+      return;
+    }
+    setPreviewing(true);
     setValidationErrors([]);
     try {
       await handleSave();
       const session = await createAdminPreview(courseId, lessonId, location.pathname);
-      window.open(
-        `/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`,
-        '_blank',
-      );
+      win.location.href = `/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`;
     } catch (err) {
+      win.close();
       const message = err instanceof Error ? err.message : 'Ошибка предпросмотра';
       const details = getDraftValidationErrors(err).map(item => item.message);
       setValidationErrors(details);
       setSaveError(details.length > 0 ? '' : message);
+    } finally {
+      setPreviewing(false);
     }
-  }, [courseId, handleSave, lessonId, location.pathname]);
+  }, [courseId, handleSave, lessonId, location.pathname, previewing]);
 
   if (loading) return <Spinner />;
   if (error) return <div className={styles.page}><div className={styles.error}>{error}</div></div>;

@@ -104,18 +104,29 @@ export default function Moderation() {
     }
   }, [rejectComment, reload]);
 
+  const [previewing, setPreviewing] = useState(false);
   const handlePreview = useCallback(async (review: PendingReview) => {
     if (!previewLessonId) {
       setActionError('Выберите урок для предпросмотра');
       return;
     }
+    if (previewing) return;
+    const win = window.open('about:blank', '_blank');
+    if (!win) {
+      setActionError('Разрешите всплывающие окна для предпросмотра');
+      return;
+    }
+    setPreviewing(true);
     try {
       const session = await createModerationPreview(review.review_id, previewLessonId, location.pathname);
-      window.open(`/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`, '_blank');
+      win.location.href = `/admin/preview/${session.preview_session_id}?return_to=${encodeURIComponent(location.pathname)}`;
     } catch (err) {
+      win.close();
       setActionError(err instanceof Error ? err.message : 'Ошибка предпросмотра');
+    } finally {
+      setPreviewing(false);
     }
-  }, [location.pathname, previewLessonId]);
+  }, [location.pathname, previewLessonId, previewing]);
 
   if (loading) return <Spinner />;
 
