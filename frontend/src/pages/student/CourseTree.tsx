@@ -75,7 +75,6 @@ function LessonNodeItem({
         role={isActive ? 'button' : undefined}
         tabIndex={isActive ? 0 : undefined}
       >
-        {isActive && <span className={styles.mascotBubble}>🤖</span>}
         {appearance.icon}
       </div>
 
