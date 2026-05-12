@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -48,6 +47,9 @@ type CourseTreeView struct {
 type GameStateView struct {
 	XPTotal           int64            `json:"xp_total"`
 	Level             int              `json:"level"`
+	HeartsCurrent     int              `json:"hearts_current"`
+	HeartsMax         int              `json:"hearts_max"`
+	HeartsRestoreAt   *string          `json:"hearts_restore_at"`
 	CurrentStreakDays int              `json:"current_streak_days"`
 	BestStreakDays    int              `json:"best_streak_days"`
 	Badges            []map[string]any `json:"badges"`
@@ -65,24 +67,21 @@ type StepView struct {
 	StepsTotal     int            `json:"steps_total"`
 	ProgressRatio  float64        `json:"progress_ratio"`
 	GameState      GameStateMini  `json:"game_state"`
-	Navigation     StepNavigation `json:"navigation"`
-}
-
-type StepNavigation struct {
-	CanGoBack        bool    `json:"can_go_back"`
-	BackKind         *string `json:"back_kind,omitempty"`
-	BackTargetNodeID *string `json:"back_target_node_id,omitempty"`
 }
 
 type GameStateMini struct {
-	XPTotal int64 `json:"xp_total"`
-	Level   int   `json:"level"`
+	XPTotal         int64   `json:"xp_total"`
+	Level           int     `json:"level"`
+	HeartsCurrent   int     `json:"hearts_current"`
+	HeartsMax       int     `json:"hearts_max"`
+	HeartsRestoreAt *string `json:"hearts_restore_at"`
 }
 
 type AnswerOutcome struct {
 	Verdict          string         `json:"verdict"`
 	FeedbackText     string         `json:"feedback_text"`
 	XPDelta          int            `json:"xp_delta"`
+	HeartsDelta      int            `json:"hearts_delta"`
 	GameState        GameStateMini  `json:"game_state"`
 	NextAction       string         `json:"next_action"`
 	NextNodeID       *string        `json:"next_node_id"`
@@ -120,28 +119,6 @@ func DecodeAnswerRequest(r *http.Request) (int64, string, map[string]any, error)
 		return 0, "", nil, err
 	}
 	return body.StateVersion, body.NodeID, body.Answer, nil
-}
-
-func DecodeDecisionRequest(r *http.Request) (int64, string, string, error) {
-	var body struct {
-		StateVersion int64  `json:"state_version"`
-		NodeID       string `json:"node_id"`
-		OptionID     string `json:"option_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		return 0, "", "", err
-	}
-	return body.StateVersion, body.NodeID, body.OptionID, nil
-}
-
-func DecodeBackRequest(r *http.Request) (int64, error) {
-	var body struct {
-		StateVersion int64 `json:"state_version"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		return 0, err
-	}
-	return body.StateVersion, nil
 }
 
 func (s *Service) Catalog(ctx context.Context, studentID string) (CatalogView, error) {
@@ -270,6 +247,9 @@ func (s *Service) GameState(ctx context.Context, studentID string) (GameStateVie
 	return GameStateView{
 		XPTotal:           state.XPTotal,
 		Level:             state.Level,
+		HeartsCurrent:     state.HeartsCurrent,
+		HeartsMax:         state.HeartsMax,
+		HeartsRestoreAt:   state.HeartsRestoreAt,
 		CurrentStreakDays: state.CurrentStreakDays,
 		BestStreakDays:    state.BestStreakDays,
 		Badges:            badges,
@@ -372,17 +352,18 @@ func (s *Service) StartLesson(ctx context.Context, studentID string, courseID st
 		if err := s.ensureLessonAccessTx(ctx, tx, studentID, courseID, lessonID); err != nil {
 			return StepView{}, err
 		}
-		if err := s.ensurePathInitializedTx(ctx, tx, sessionID, graph.NodeMap[currentNodeID]); err != nil {
-			return StepView{}, err
-		}
-		step, err := withNavigation(ctx, tx, sessionID, currentNodeID, renderStep(sessionID, courseID, lessonID, stateVersion, graph, currentNodeID, state))
-		if err != nil {
+		restartedVersion := stateVersion + 1
+		if _, err := tx.Exec(ctx, `
+			update lesson_sessions
+			set current_node_id = $2, state_version = $3, last_activity_at = now()
+			where id = $1
+		`, sessionID, graph.StartNodeID, restartedVersion); err != nil {
 			return StepView{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return StepView{}, err
 		}
-		return step, nil
+		return renderStep(sessionID, courseID, lessonID, restartedVersion, graph, graph.StartNodeID, state), nil
 	}
 
 	if err := s.ensureLessonStartAllowedTx(ctx, tx, studentID, courseID, revisionID, lessonID); err != nil {
@@ -417,21 +398,24 @@ func (s *Service) StartLesson(ctx context.Context, studentID string, courseID st
 			`, studentID, courseID, lessonID).Scan(&sessionID, &currentNodeID, &stateVersion); err != nil {
 				return StepView{}, err
 			}
+			restartedVersion := stateVersion + 1
+			if _, err := tx.Exec(ctx, `
+				update lesson_sessions
+				set current_node_id = $2, state_version = $3, last_activity_at = now()
+				where id = $1
+			`, sessionID, graph.StartNodeID, restartedVersion); err != nil {
+				return StepView{}, err
+			}
+			stateVersion = restartedVersion
+			currentNodeID = graph.StartNodeID
 		} else {
 			return StepView{}, err
 		}
 	}
-	if err := s.ensurePathInitializedTx(ctx, tx, sessionID, graph.NodeMap[currentNodeID]); err != nil {
-		return StepView{}, err
-	}
-	step, err := withNavigation(ctx, tx, sessionID, currentNodeID, renderStep(sessionID, courseID, lessonID, stateVersion, graph, currentNodeID, state))
-	if err != nil {
-		return StepView{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return StepView{}, err
 	}
-	return step, nil
+	return renderStep(sessionID, courseID, lessonID, stateVersion, graph, currentNodeID, state), nil
 }
 
 func (s *Service) SessionByCourseLesson(ctx context.Context, studentID string, courseID string, lessonID string) (StepView, error) {
@@ -491,7 +475,7 @@ func (s *Service) SessionByID(ctx context.Context, studentID string, sessionID s
 	if err != nil {
 		return StepView{}, err
 	}
-	return withNavigation(ctx, s.db, sessionID, currentNodeID, renderStep(sessionID, courseID, lessonID, stateVersion, graph, currentNodeID, state))
+	return renderStep(sessionID, courseID, lessonID, stateVersion, graph, currentNodeID, state), nil
 }
 
 func (s *Service) Next(ctx context.Context, studentID string, sessionID string, stateVersion int64, expectedNodeID string) (StepView, error) {
@@ -528,9 +512,6 @@ func (s *Service) Next(ctx context.Context, studentID string, sessionID string, 
 	if err != nil {
 		return StepView{}, err
 	}
-	if err := s.ensurePathInitializedTx(ctx, tx, sessionID, graph.NodeMap[currentNodeID]); err != nil {
-		return StepView{}, err
-	}
 	if currentVersion != stateVersion || currentNodeID != expectedNodeID {
 		priorNode := graph.NodeMap[expectedNodeID]
 		if currentVersion == stateVersion+1 && priorNode.Kind == "story" && priorNode.NextNodeID != "" && currentNodeID == priorNode.NextNodeID {
@@ -549,7 +530,7 @@ func (s *Service) Next(ctx context.Context, studentID string, sessionID string, 
 			if err := tx.Commit(ctx); err != nil {
 				return StepView{}, err
 			}
-			return withNavigation(ctx, s.db, sessionID, currentNodeID, renderStep(sessionID, courseID, lessonID, currentVersion, graph, currentNodeID, state))
+			return renderStep(sessionID, courseID, lessonID, currentVersion, graph, currentNodeID, state), nil
 		}
 		return StepView{}, ErrLessonSessionStateConflict
 	}
@@ -580,17 +561,10 @@ func (s *Service) Next(ctx context.Context, studentID string, sessionID string, 
 	if _, err := tx.Exec(ctx, `update lesson_sessions set current_node_id = $2, state_version = $3, last_activity_at = now() where id = $1`, sessionID, node.NextNodeID, newVersion); err != nil {
 		return StepView{}, err
 	}
-	if err := s.appendPathEntryTx(ctx, tx, sessionID, nextNode, "story_next", nil); err != nil {
-		return StepView{}, err
-	}
-	step, err := withNavigation(ctx, tx, sessionID, nextNode.ID, renderStep(sessionID, courseID, lessonID, newVersion, graph, nextNode.ID, state))
-	if err != nil {
-		return StepView{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return StepView{}, err
 	}
-	return step, nil
+	return renderStep(sessionID, courseID, lessonID, newVersion, graph, nextNode.ID, state), nil
 }
 
 func (s *Service) Answer(ctx context.Context, studentID string, sessionID string, stateVersion int64, nodeID string, answer map[string]any, idempotencyKey string) (AnswerOutcome, error) {
@@ -636,11 +610,15 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 		return AnswerOutcome{}, ErrDuplicateAnswerSubmission
 	}
 
-	graph, err := s.graphForRevisionLessonTx(ctx, tx, revisionID, lessonID)
+	state, err := s.ensureGameStateTx(ctx, tx, studentID)
 	if err != nil {
 		return AnswerOutcome{}, err
 	}
-	if err := s.ensurePathInitializedTx(ctx, tx, sessionID, graph.NodeMap[currentNodeID]); err != nil {
+	if state.HeartsCurrent <= 0 {
+		return AnswerOutcome{}, ErrOutOfHearts
+	}
+	graph, err := s.graphForRevisionLessonTx(ctx, tx, revisionID, lessonID)
+	if err != nil {
 		return AnswerOutcome{}, err
 	}
 	node := graph.NodeMap[nodeID]
@@ -655,13 +633,17 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 	if err != nil {
 		return AnswerOutcome{}, err
 	}
+	var heartsDelta int
 	var xpDelta int
+	if evaluationResult.Verdict == "incorrect" {
+		heartsDelta = -1
+	}
 	if evaluationResult.Verdict == "correct" {
 		xpDelta = 10
 	} else if evaluationResult.Verdict == "partial" {
 		xpDelta = 5
 	}
-	if err := s.applyGameMutationTx(ctx, tx, studentID, xpDelta); err != nil {
+	if err := s.applyGameMutationTx(ctx, tx, studentID, xpDelta, heartsDelta); err != nil {
 		return AnswerOutcome{}, err
 	}
 	var attemptNo int
@@ -713,12 +695,12 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 	}
 	if _, err := tx.Exec(ctx, `
 		insert into game_events(student_id, source_type, source_id, event_type, xp_delta, hearts_delta, streak_delta)
-		values ($1, 'step_attempt', $2, 'evaluated', $3, 0, 0)
-	`, studentID, attemptID, xpDelta); err != nil {
+		values ($1, 'step_attempt', $2, 'evaluated', $3, $4, 0)
+	`, studentID, attemptID, xpDelta, heartsDelta); err != nil {
 		return AnswerOutcome{}, err
 	}
 
-	state, err := s.ensureGameStateTx(ctx, tx, studentID)
+	state, err = s.ensureGameStateTx(ctx, tx, studentID)
 	if err != nil {
 		return AnswerOutcome{}, err
 	}
@@ -735,7 +717,8 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 			Verdict:          evaluationResult.Verdict,
 			FeedbackText:     evaluationResult.Feedback,
 			XPDelta:          xpDelta,
-				GameState:        state.toMini(),
+			HeartsDelta:      heartsDelta,
+			GameState:        state.toMini(),
 			NextAction:       "lesson_completed",
 			NextNodeID:       nil,
 			LessonCompletion: completion,
@@ -747,196 +730,21 @@ func (s *Service) Answer(ctx context.Context, studentID string, sessionID string
 	if _, err := tx.Exec(ctx, `update lesson_sessions set current_node_id = $2, state_version = $3, last_activity_at = now() where id = $1`, sessionID, evaluationResult.NextNodeID, newVersion); err != nil {
 		return AnswerOutcome{}, err
 	}
-	if err := s.appendPathEntryTx(ctx, tx, sessionID, nextNode, "answer", nil); err != nil {
-		return AnswerOutcome{}, err
-	}
-	step, err := withNavigation(ctx, tx, sessionID, evaluationResult.NextNodeID, renderStep(sessionID, courseID, lessonID, newVersion, graph, evaluationResult.NextNodeID, state))
-	if err != nil {
-		return AnswerOutcome{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return AnswerOutcome{}, err
 	}
+	step := renderStep(sessionID, courseID, lessonID, newVersion, graph, evaluationResult.NextNodeID, state)
 	return AnswerOutcome{
 		Verdict:          evaluationResult.Verdict,
 		FeedbackText:     evaluationResult.Feedback,
 		XPDelta:          xpDelta,
+		HeartsDelta:      heartsDelta,
 		GameState:        state.toMini(),
 		NextAction:       "show_next_node",
 		NextNodeID:       &evaluationResult.NextNodeID,
 		LessonCompletion: nil,
 		NextStep:         &step,
 	}, nil
-}
-
-func (s *Service) Decision(ctx context.Context, studentID string, sessionID string, stateVersion int64, nodeID string, optionID string) (StepView, error) {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return StepView{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	var courseID, revisionID, lessonID, currentNodeID, status string
-	var currentVersion int64
-	if err := tx.QueryRow(ctx, `
-		select cp.course_id::text, ls.course_revision_id::text, ls.lesson_id, ls.current_node_id, ls.state_version, ls.status
-		from lesson_sessions ls
-		join course_progress cp on cp.id = ls.course_progress_id
-		where ls.id = $1 and ls.student_id = $2
-		for update
-	`, sessionID, studentID).Scan(&courseID, &revisionID, &lessonID, &currentNodeID, &currentVersion, &status); err != nil {
-		if err == pgx.ErrNoRows {
-			return StepView{}, ErrLessonSessionNotFound
-		}
-		return StepView{}, err
-	}
-	if status != "in_progress" {
-		return StepView{}, ErrLessonSessionNotActive
-	}
-	if err := s.ensureCourseAccessTx(ctx, tx, studentID, courseID); err != nil {
-		return StepView{}, err
-	}
-	if err := s.ensureLessonAccessTx(ctx, tx, studentID, courseID, lessonID); err != nil {
-		return StepView{}, err
-	}
-	graph, err := s.graphForRevisionLessonTx(ctx, tx, revisionID, lessonID)
-	if err != nil {
-		return StepView{}, err
-	}
-	if err := s.ensurePathInitializedTx(ctx, tx, sessionID, graph.NodeMap[currentNodeID]); err != nil {
-		return StepView{}, err
-	}
-	node := graph.NodeMap[nodeID]
-	if node.Kind != "decision" {
-		return StepView{}, ErrDecisionOnNonDecisionNode
-	}
-	var selected *runtimeOption
-	for _, option := range node.Options {
-		if option.ID == optionID {
-			opt := option
-			selected = &opt
-			break
-		}
-	}
-	if selected == nil || strings.TrimSpace(selected.NextNodeID) == "" {
-		return StepView{}, ErrInvalidDecisionOption
-	}
-	if currentVersion != stateVersion || currentNodeID != nodeID {
-		if currentVersion == stateVersion+1 && currentNodeID == selected.NextNodeID {
-			state, err := s.ensureGameStateTx(ctx, tx, studentID)
-			if err != nil {
-				return StepView{}, err
-			}
-			if err := tx.Commit(ctx); err != nil {
-				return StepView{}, err
-			}
-			return withNavigation(ctx, s.db, sessionID, currentNodeID, renderStep(sessionID, courseID, lessonID, currentVersion, graph, currentNodeID, state))
-		}
-		return StepView{}, ErrLessonSessionStateConflict
-	}
-	nextNode := graph.NodeMap[selected.NextNodeID]
-	newVersion := currentVersion + 1
-	if _, err := tx.Exec(ctx, `update lesson_sessions set current_node_id = $2, state_version = $3, last_activity_at = now() where id = $1`, sessionID, selected.NextNodeID, newVersion); err != nil {
-		return StepView{}, err
-	}
-	if err := s.appendPathEntryTx(ctx, tx, sessionID, nextNode, "decision", &optionID); err != nil {
-		return StepView{}, err
-	}
-	state, err := s.ensureGameStateTx(ctx, tx, studentID)
-	if err != nil {
-		return StepView{}, err
-	}
-	step, err := withNavigation(ctx, tx, sessionID, selected.NextNodeID, renderStep(sessionID, courseID, lessonID, newVersion, graph, selected.NextNodeID, state))
-	if err != nil {
-		return StepView{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return StepView{}, err
-	}
-	return step, nil
-}
-
-func (s *Service) Back(ctx context.Context, studentID string, sessionID string, stateVersion int64) (StepView, error) {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return StepView{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	var courseID, revisionID, lessonID, currentNodeID, status string
-	var currentVersion int64
-	if err := tx.QueryRow(ctx, `
-		select cp.course_id::text, ls.course_revision_id::text, ls.lesson_id, ls.current_node_id, ls.state_version, ls.status
-		from lesson_sessions ls
-		join course_progress cp on cp.id = ls.course_progress_id
-		where ls.id = $1 and ls.student_id = $2
-		for update
-	`, sessionID, studentID).Scan(&courseID, &revisionID, &lessonID, &currentNodeID, &currentVersion, &status); err != nil {
-		if err == pgx.ErrNoRows {
-			return StepView{}, ErrLessonSessionNotFound
-		}
-		return StepView{}, err
-	}
-	if status != "in_progress" {
-		return StepView{}, ErrLessonSessionNotActive
-	}
-	if err := s.ensureCourseAccessTx(ctx, tx, studentID, courseID); err != nil {
-		return StepView{}, err
-	}
-	if err := s.ensureLessonAccessTx(ctx, tx, studentID, courseID, lessonID); err != nil {
-		return StepView{}, err
-	}
-	graph, err := s.graphForRevisionLessonTx(ctx, tx, revisionID, lessonID)
-	if err != nil {
-		return StepView{}, err
-	}
-	if err := s.ensurePathInitializedTx(ctx, tx, sessionID, graph.NodeMap[currentNodeID]); err != nil {
-		return StepView{}, err
-	}
-	if currentVersion != stateVersion {
-		return StepView{}, ErrLessonSessionStateConflict
-	}
-	currentEntry, ok, err := latestActivePathEntry(ctx, tx, sessionID)
-	if err != nil {
-		return StepView{}, err
-	}
-	if !ok || currentEntry.NodeID != currentNodeID {
-		return StepView{}, ErrLessonSessionBackUnavailable
-	}
-	decisionEntry, ok, err := priorDecisionEntryTx(ctx, tx, sessionID, currentEntry.SeqNo)
-	if err != nil {
-		return StepView{}, err
-	}
-	if !ok {
-		return StepView{}, ErrLessonSessionBackUnavailable
-	}
-	if _, err := tx.Exec(ctx, `
-		update lesson_session_path_entries
-		set active = false
-		where lesson_session_id = $1 and active = true and seq_no > $2
-	`, sessionID, decisionEntry.SeqNo); err != nil {
-		return StepView{}, err
-	}
-	newVersion := currentVersion + 1
-	if _, err := tx.Exec(ctx, `
-		update lesson_sessions
-		set current_node_id = $2, state_version = $3, last_activity_at = now()
-		where id = $1
-	`, sessionID, decisionEntry.NodeID, newVersion); err != nil {
-		return StepView{}, err
-	}
-	state, err := s.ensureGameStateTx(ctx, tx, studentID)
-	if err != nil {
-		return StepView{}, err
-	}
-	step, err := withNavigation(ctx, tx, sessionID, decisionEntry.NodeID, renderStep(sessionID, courseID, lessonID, newVersion, graph, decisionEntry.NodeID, state))
-	if err != nil {
-		return StepView{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return StepView{}, err
-	}
-	return step, nil
 }
 
 func (s *Service) Retry(ctx context.Context, studentID string, courseID string, lessonID string) (StepView, error) {
@@ -982,30 +790,29 @@ func (s *Service) Retry(ctx context.Context, studentID string, courseID string, 
 		}
 		return StepView{}, err
 	}
-	if err := s.appendPathEntryTx(ctx, tx, sessionID, graph.NodeMap[graph.StartNodeID], "retry", nil); err != nil {
-		return StepView{}, err
-	}
-	step, err := withNavigation(ctx, tx, sessionID, graph.StartNodeID, renderStep(sessionID, courseID, lessonID, 1, graph, graph.StartNodeID, state))
-	if err != nil {
-		return StepView{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return StepView{}, err
 	}
-	return step, nil
+	return renderStep(sessionID, courseID, lessonID, 1, graph, graph.StartNodeID, state), nil
 }
 
 type gameState struct {
 	XPTotal           int64
 	Level             int
+	HeartsCurrent     int
+	HeartsMax         int
+	HeartsRestoreAt   *string
 	CurrentStreakDays int
 	BestStreakDays    int
 }
 
 func (g gameState) toMini() GameStateMini {
 	return GameStateMini{
-		XPTotal: g.XPTotal,
-		Level:   g.Level,
+		XPTotal:         g.XPTotal,
+		Level:           g.Level,
+		HeartsCurrent:   g.HeartsCurrent,
+		HeartsMax:       g.HeartsMax,
+		HeartsRestoreAt: g.HeartsRestoreAt,
 	}
 }
 
@@ -1016,12 +823,10 @@ var (
 	ErrAnswerOnNonQuestionNode           = fmt.Errorf("answer_on_non_question_node")
 	ErrLessonRetryNotAllowed             = fmt.Errorf("lesson_retry_not_allowed")
 	ErrDuplicateAnswerSubmission         = fmt.Errorf("duplicate_answer_submission")
-	ErrDecisionOnNonDecisionNode         = fmt.Errorf("decision_on_non_decision_node")
-	ErrInvalidDecisionOption             = fmt.Errorf("invalid_decision_option")
-	ErrLessonSessionBackUnavailable      = fmt.Errorf("lesson_session_back_unavailable")
 	ErrContentLockedPaid                 = fmt.Errorf("content_locked_paid")
 	ErrContentAccessAwaitingConfirmation = fmt.Errorf("content_access_awaiting_confirmation")
 	ErrLockedTeacherAccess               = fmt.Errorf("locked_teacher_access")
 	ErrLockedPrerequisite                = fmt.Errorf("locked_prerequisite")
+	ErrOutOfHearts                       = fmt.Errorf("out_of_hearts")
 	ErrLLMTemporarilyUnavailable         = fmt.Errorf("llm_temporarily_unavailable")
 )

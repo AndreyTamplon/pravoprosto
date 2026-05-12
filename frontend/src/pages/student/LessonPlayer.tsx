@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   startLesson,
-  getLessonSession,
+  retryLesson,
   nextStep,
   submitAnswer,
-  chooseDecision,
-  goBackInLesson,
   getGameState,
 } from '../../api/client';
-import { generateIdempotencyKey } from '../../utils/format';
+import { generateIdempotencyKey, formatMinutesTimer } from '../../utils/format';
 import { HudBar, Button, SpeechBubble, ComicBurst } from '../../components/ui';
 import type {
   StepView,
@@ -23,12 +21,12 @@ type PlayerScreen =
   | { kind: 'loading' }
   | { kind: 'story'; step: StepView }
   | { kind: 'single_choice'; step: StepView }
-  | { kind: 'decision'; step: StepView }
   | { kind: 'free_text'; step: StepView }
   | { kind: 'end'; step: StepView }
   | { kind: 'checking' }
   | { kind: 'feedback'; result: AnswerOutcome }
   | { kind: 'complete'; completion: Record<string, unknown> | null }
+  | { kind: 'hearts_empty'; recoveryAt?: string | null }
   | { kind: 'error'; message: string };
 
 /* ===== Confetti helper ===== */
@@ -64,10 +62,39 @@ function Confetti() {
   );
 }
 
+/* ===== Recovery Timer ===== */
+function RecoveryTimer({ recoveryAt }: { recoveryAt?: string | null }) {
+  const [secondsLeft, setSecondsLeft] = useState(0);
+
+  useEffect(() => {
+    if (!recoveryAt) return;
+    const target = new Date(recoveryAt).getTime();
+
+    const tick = () => {
+      const diff = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+      setSecondsLeft(diff);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [recoveryAt]);
+
+  if (!recoveryAt || secondsLeft <= 0) return null;
+
+  return (
+    <div className={styles.recoveryTimer}>
+      {formatMinutesTimer(secondsLeft)}
+    </div>
+  );
+}
+
 /* ===== Main Component ===== */
 export default function LessonPlayer() {
   const { courseId, lessonId } = useParams<{ courseId: string; lessonId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const shouldRetry = new URLSearchParams(location.search).get('retry') === '1';
 
   // Session state
   const [currentStep, setCurrentStep] = useState<StepView | null>(null);
@@ -100,11 +127,14 @@ export default function LessonPlayer() {
     if (!courseId || !lessonId) return;
     setScreen({ kind: 'loading' });
     try {
-      // Try to resume existing session first
       let step: StepView;
-      try {
-        step = await getLessonSession(courseId, lessonId);
-      } catch {
+      if (shouldRetry) {
+        try {
+          step = await retryLesson(courseId, lessonId);
+        } catch {
+          step = await startLesson(courseId, lessonId);
+        }
+      } else {
         step = await startLesson(courseId, lessonId);
       }
       setCurrentStep(step);
@@ -114,7 +144,7 @@ export default function LessonPlayer() {
       const message = err instanceof Error ? err.message : 'Failed to start lesson';
       setScreen({ kind: 'error', message });
     }
-  }, [courseId, lessonId]);
+  }, [courseId, lessonId, shouldRetry]);
 
   useEffect(() => {
     initSession();
@@ -132,9 +162,6 @@ export default function LessonPlayer() {
         break;
       case 'single_choice':
         setScreen({ kind: 'single_choice', step });
-        break;
-      case 'decision':
-        setScreen({ kind: 'decision', step });
         break;
       case 'free_text':
         setScreen({ kind: 'free_text', step });
@@ -194,8 +221,17 @@ export default function LessonPlayer() {
       // Track XP
       setSessionXp((x) => x + result.xp_delta);
 
-      // Update game state from the answer outcome
+      // Update hearts from the answer outcome game_state
+      const newHearts = result.game_state.hearts_current;
       setCurrentStep((step) => (step ? { ...step, game_state: result.game_state } : step));
+      setGameState((gs) => gs ? { ...gs, hearts_current: newHearts, hearts_restore_at: result.game_state.hearts_restore_at } : gs);
+
+      // Check if hearts are depleted
+      if (newHearts <= 0) {
+        setScreen({ kind: 'hearts_empty', recoveryAt: result.game_state.hearts_restore_at });
+        setSubmitting(false);
+        return;
+      }
 
       // Update current step if next_step is present
       if (result.next_step) {
@@ -206,38 +242,6 @@ export default function LessonPlayer() {
       setScreen({ kind: 'feedback', result });
     } catch (err) {
       setScreen({ kind: 'error', message: err instanceof Error ? err.message : 'Error submitting answer' });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDecision = async () => {
-    if (!currentStep || !selectedOption) return;
-    setSubmitting(true);
-    try {
-      const updated = await chooseDecision(currentStep.session_id, {
-        node_id: currentStep.node_id,
-        option_id: selectedOption,
-        state_version: currentStep.state_version,
-      });
-      setCurrentStep(updated);
-      transitionToStep(updated);
-    } catch (err) {
-      setScreen({ kind: 'error', message: err instanceof Error ? err.message : 'Ошибка выбора' });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleGoBack = async () => {
-    if (!currentStep) return;
-    setSubmitting(true);
-    try {
-      const updated = await goBackInLesson(currentStep.session_id, currentStep.state_version);
-      setCurrentStep(updated);
-      transitionToStep(updated);
-    } catch (err) {
-      setScreen({ kind: 'error', message: err instanceof Error ? err.message : 'Ошибка возврата' });
     } finally {
       setSubmitting(false);
     }
@@ -276,12 +280,14 @@ export default function LessonPlayer() {
   const elapsedMinutes = Math.floor(elapsedSeconds / 60);
 
   // Render HudBar
+  const hearts = currentStep?.game_state?.hearts_current ?? gameState?.hearts_current ?? 5;
+  const heartsMax = currentStep?.game_state?.hearts_max ?? gameState?.hearts_max ?? 5;
   const xp = currentStep?.game_state?.xp_total ?? gameState?.xp_total ?? 0;
   const streak = gameState?.current_streak_days ?? 0;
   const progress = currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
 
   // Extract payload helpers
-  const payload = (screen.kind === 'story' || screen.kind === 'single_choice' || screen.kind === 'decision' || screen.kind === 'free_text' || screen.kind === 'end')
+  const payload = (screen.kind === 'story' || screen.kind === 'single_choice' || screen.kind === 'free_text' || screen.kind === 'end')
     ? screen.step.payload
     : {};
 
@@ -290,17 +296,14 @@ export default function LessonPlayer() {
   const illustrationUrl = (payload as Record<string, unknown>).illustration_url as string | undefined;
   const questionText = ((payload as Record<string, unknown>).prompt ?? (payload as Record<string, unknown>).question_text) as string | undefined;
   const options = (payload as Record<string, unknown>).options as Array<{ id: string; text: string }> | undefined;
-  const canGoBack = Boolean(
-    (screen.kind === 'story' || screen.kind === 'decision' || screen.kind === 'end')
-      ? screen.step.navigation?.can_go_back
-      : currentStep?.navigation?.can_go_back,
-  );
 
   return (
     <div className={styles.playerLayout}>
       <HudBar
         onClose={handleClose}
         progress={progress}
+        hearts={hearts}
+        heartsMax={heartsMax}
         xp={xp}
         streak={streak}
       />
@@ -338,11 +341,6 @@ export default function LessonPlayer() {
             </SpeechBubble>
 
             <div className={styles.storyActions}>
-              {canGoBack && (
-                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
-                  Назад к выбору
-                </Button>
-              )}
               <Button
                 variant="primary"
                 onClick={handleStoryNext}
@@ -400,50 +398,6 @@ export default function LessonPlayer() {
           </div>
         )}
 
-        {screen.kind === 'decision' && (
-          <div className={styles.questionScreen} data-node-kind="decision" data-role="current-node">
-            <div className={styles.questionText} data-role="prompt">
-              {questionText}
-            </div>
-
-            <div className={styles.options}>
-              {(options ?? []).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  data-role="option"
-                  data-option-id={opt.id}
-                  className={[
-                    styles.option,
-                    selectedOption === opt.id ? styles.optionSelected : '',
-                    submitting ? styles.optionDisabled : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => !submitting && setSelectedOption(opt.id)}
-                >
-                  {opt.text}
-                </button>
-              ))}
-            </div>
-
-            <div className={styles.submitRow}>
-              {canGoBack && (
-                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
-                  Назад к выбору
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                onClick={handleDecision}
-                disabled={!selectedOption || submitting}
-              >
-                Выбрать
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Free Text */}
         {screen.kind === 'free_text' && (
           <div className={styles.questionScreen} data-node-kind="free_text" data-role="current-node">
@@ -487,11 +441,6 @@ export default function LessonPlayer() {
             </SpeechBubble>
 
             <div className={styles.storyActions}>
-              {canGoBack && (
-                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
-                  Назад к выбору
-                </Button>
-              )}
               <Button
                 variant="primary"
                 onClick={handleEndComplete}
@@ -508,6 +457,21 @@ export default function LessonPlayer() {
           <div className={styles.loadingScreen}>
             <div className={styles.loadingShield}>🛡️</div>
             <div className={styles.loadingText}>Проверяем ответ...</div>
+          </div>
+        )}
+
+        {/* Hearts Empty */}
+        {screen.kind === 'hearts_empty' && (
+          <div className={styles.heartsEmptyScreen} data-role="hearts-empty">
+            <div className={styles.heartsEmptyMascot}>😢</div>
+            <div className={styles.heartsEmptyTitle}>Жизни закончились 💔</div>
+            <div className={styles.heartsEmptyDesc}>
+              Подожди, пока жизни восстановятся, или повтори пройденные уроки
+            </div>
+            <RecoveryTimer recoveryAt={screen.recoveryAt} />
+            <Button variant="outline" onClick={handleClose}>
+              К пройденным урокам
+            </Button>
           </div>
         )}
 
@@ -594,6 +558,10 @@ export default function LessonPlayer() {
 
             {screen.result.xp_delta > 0 && (
               <div className={styles.feedbackXp}>+{screen.result.xp_delta} XP ⭐</div>
+            )}
+
+            {screen.result.hearts_delta < 0 && (
+              <div className={styles.feedbackHearts}>{screen.result.hearts_delta} ❤️</div>
             )}
 
             <div className={styles.feedbackAction}>

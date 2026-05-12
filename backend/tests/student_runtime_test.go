@@ -107,11 +107,21 @@ func TestStudentCatalogTree_PrerequisitePinnedRevisionAndTeacherLock(t *testing.
 	}
 	defer startResp.Body.Close()
 	var firstStart struct {
-		SessionID string `json:"session_id"`
+		SessionID    string `json:"session_id"`
+		StateVersion int64  `json:"state_version"`
+		NodeID       string `json:"node_id"`
 	}
 	if err := json.NewDecoder(startResp.Body).Decode(&firstStart); err != nil {
 		t.Fatalf("decode first start: %v", err)
 	}
+	advanceResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/lesson-sessions/"+firstStart.SessionID+"/next", map[string]any{
+		"state_version":    firstStart.StateVersion,
+		"expected_node_id": firstStart.NodeID,
+	}, studentCSRF)
+	if advanceResp.StatusCode != http.StatusOK {
+		t.Fatalf("advance lesson_1 status: %d", advanceResp.StatusCode)
+	}
+	_ = advanceResp.Body.Close()
 
 	resumeResp := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/courses/"+platformCourseID+"/lessons/lesson_1/start", map[string]any{}, studentCSRF)
 	if resumeResp.StatusCode != http.StatusOK {
@@ -120,12 +130,16 @@ func TestStudentCatalogTree_PrerequisitePinnedRevisionAndTeacherLock(t *testing.
 	defer resumeResp.Body.Close()
 	var secondStart struct {
 		SessionID string `json:"session_id"`
+		NodeID    string `json:"node_id"`
 	}
 	if err := json.NewDecoder(resumeResp.Body).Decode(&secondStart); err != nil {
 		t.Fatalf("decode second start: %v", err)
 	}
 	if secondStart.SessionID != firstStart.SessionID {
 		t.Fatalf("expected same active session, got %s and %s", firstStart.SessionID, secondStart.SessionID)
+	}
+	if secondStart.NodeID != firstStart.NodeID {
+		t.Fatalf("expected lesson restart from node %s, got %s", firstStart.NodeID, secondStart.NodeID)
 	}
 
 	contentV2 := map[string]any{

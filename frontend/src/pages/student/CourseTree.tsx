@@ -43,11 +43,13 @@ function LessonNodeItem({
   const offer = node.access.offer;
   const isCompleted = accessState === 'completed';
   const isActive = accessState === 'free' || accessState === 'granted';
+  const canStartLesson = isActive || isCompleted;
   const hasProgress = node.status === 'in_progress';
   const appearance = getNodeAppearance(accessState, hasProgress);
 
   const handleStart = () => {
-    navigate(`/student/courses/${courseId}/lessons/${node.lesson_id}`);
+    const search = isCompleted ? '?retry=1' : '';
+    navigate(`/student/courses/${courseId}/lessons/${node.lesson_id}${search}`);
   };
 
   const handlePurchase = async () => {
@@ -71,10 +73,11 @@ function LessonNodeItem({
 
       <div
         className={`${styles.node} ${appearance.cls}`}
-        onClick={isActive ? handleStart : undefined}
-        role={isActive ? 'button' : undefined}
-        tabIndex={isActive ? 0 : undefined}
+        onClick={canStartLesson ? handleStart : undefined}
+        role={canStartLesson ? 'button' : undefined}
+        tabIndex={canStartLesson ? 0 : undefined}
       >
+        {canStartLesson && <span className={styles.mascotBubble}>🤖</span>}
         {appearance.icon}
       </div>
 
@@ -82,10 +85,10 @@ function LessonNodeItem({
         <div className={styles.nodeName}>{node.title}</div>
       </div>
 
-      {isActive && (
+      {canStartLesson && (
         <div className={styles.nodeAction}>
           <Button variant="primary" size="sm" onClick={handleStart}>
-            {hasProgress ? 'Продолжить' : 'Начать миссию'}
+            {isCompleted ? 'Пройти снова' : hasProgress ? 'Начать заново' : 'Начать миссию'}
           </Button>
         </div>
       )}
