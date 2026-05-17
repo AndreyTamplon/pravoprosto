@@ -646,6 +646,20 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusOK, view)
 			}, deps)))
+			sr.Post("/lesson-sessions/{sessionID}/abandon", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				err := deps.LessonRuntime.AbandonSession(r.Context(), session.AccountID, chi.URLParam(r, "sessionID"))
+				if err != nil {
+					switch err {
+					case lessonruntime.ErrLessonSessionNotFound:
+						writeError(w, http.StatusNotFound, "lesson_session_not_found", "Lesson session not found", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]any{})
+			}, deps)))
 			sr.Get("/profile", requireRole("student", deps, func(w http.ResponseWriter, r *http.Request) {
 				session, _ := sessionFromContext(r.Context())
 				view, err := deps.Profiles.GetStudent(r.Context(), session.AccountID)

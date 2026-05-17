@@ -8,9 +8,11 @@ import {
   chooseDecision,
   goBackInLesson,
   getGameState,
+  retryLesson,
+  abandonLessonSession,
 } from '../../api/client';
 import { generateIdempotencyKey } from '../../utils/format';
-import { HudBar, Button, SpeechBubble, ComicBurst } from '../../components/ui';
+import { HudBar, Button, SpeechBubble, ComicBurst, Modal } from '../../components/ui';
 import type {
   StepView,
   AnswerOutcome,
@@ -81,6 +83,9 @@ export default function LessonPlayer() {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [freeTextValue, setFreeTextValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Exit confirmation
+  const [confirmExitOpen, setConfirmExitOpen] = useState(false);
 
   // Idempotency
   const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
@@ -262,13 +267,55 @@ export default function LessonPlayer() {
     setScreen({ kind: 'complete', completion: null });
   };
 
-  // Close / exit
-  const handleClose = () => {
+  // Navigate away from the player without abandoning (used after confirm or on terminal screens)
+  const navigateAway = () => {
     if (courseId) {
       window.location.assign(`/student/courses/${courseId}`);
       return;
     }
     navigate('/student/courses');
+  };
+
+  // Close / exit — opens confirm modal on active screens, navigates directly on terminal ones
+  const handleClose = () => {
+    if (submitting) return;
+    if (screen.kind === 'complete' || screen.kind === 'error') {
+      navigateAway();
+      return;
+    }
+    setConfirmExitOpen(true);
+  };
+
+  const handleCancelExit = () => setConfirmExitOpen(false);
+
+  const handleConfirmExit = async () => {
+    setConfirmExitOpen(false);
+    if (currentStep?.session_id) {
+      try {
+        await abandonLessonSession(currentStep.session_id);
+      } catch (err) {
+        console.warn('Failed to abandon lesson session:', err);
+      }
+    }
+    navigateAway();
+  };
+
+  // Retry the lesson from the complete screen
+  const handleRetry = async () => {
+    if (!courseId || !lessonId) return;
+    setSubmitting(true);
+    try {
+      const step = await retryLesson(courseId, lessonId);
+      setSessionXp(0);
+      setCurrentStep(step);
+      startTimeRef.current = Date.now();
+      transitionToStep(step);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось перезапустить этап';
+      setScreen({ kind: 'error', message });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Compute elapsed time
@@ -303,6 +350,7 @@ export default function LessonPlayer() {
         progress={progress}
         xp={xp}
         streak={streak}
+        disabled={submitting}
       />
 
       <div className={styles.body}>
@@ -538,10 +586,13 @@ export default function LessonPlayer() {
               </div>
 
               <div className={styles.completeActions}>
-                <Button variant="primary" onClick={handleClose}>
+                <Button variant="primary" onClick={handleRetry} disabled={submitting} data-role="lesson-retry">
+                  Пройти заново
+                </Button>
+                <Button variant="outline" onClick={handleClose} disabled={submitting}>
                   К миссии
                 </Button>
-                <Button variant="outline" onClick={() => navigate('/student/courses')}>
+                <Button variant="outline" onClick={() => navigate('/student/courses')} disabled={submitting}>
                   Штаб героя
                 </Button>
               </div>
@@ -607,6 +658,24 @@ export default function LessonPlayer() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={confirmExitOpen}
+        onClose={handleCancelExit}
+        title="Выйти из этапа?"
+        footer={
+          <>
+            <Button variant="outline" autoFocus onClick={handleCancelExit} data-role="confirm-stay">
+              Остаться
+            </Button>
+            <Button variant="primary" onClick={handleConfirmExit} data-role="confirm-exit">
+              Выйти
+            </Button>
+          </>
+        }
+      >
+        Прогресс этого этапа будет потерян, и в следующий раз он начнётся с первого шага.
+      </Modal>
     </div>
   );
 }

@@ -98,8 +98,11 @@ test.describe('Student -- Gamification (HUD, XP, hearts)', () => {
     await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
     await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
 
-    // Click the close button (aria-label="Close")
-    await page.getByRole('button', { name: 'Close' }).click();
+    // Click the HUD close button (disambiguated via data-role to avoid Modal X collision)
+    await page.locator('[data-role="hud-close"]').click();
+
+    // Confirm exit in the confirmation modal
+    await page.locator('[data-role="confirm-exit"]').click();
 
     // Should navigate to course tree
     await page.waitForURL(`**/student/courses/${platformCourseId}`);

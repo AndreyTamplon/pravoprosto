@@ -995,6 +995,39 @@ func (s *Service) Retry(ctx context.Context, studentID string, courseID string, 
 	return step, nil
 }
 
+const TerminationReasonUserAbandoned = "user_abandoned"
+
+func (s *Service) AbandonSession(ctx context.Context, studentID string, sessionID string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var status string
+	if err := tx.QueryRow(ctx, `
+		select status from lesson_sessions
+		where id = $1 and student_id = $2
+		for update
+	`, sessionID, studentID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLessonSessionNotFound
+		}
+		return err
+	}
+	if status != "in_progress" {
+		return tx.Commit(ctx)
+	}
+	if _, err := tx.Exec(ctx, `
+		update lesson_sessions
+		set status = 'terminated', terminated_at = now(), termination_reason = $2, last_activity_at = now()
+		where id = $1
+	`, sessionID, TerminationReasonUserAbandoned); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 type gameState struct {
 	XPTotal           int64
 	Level             int

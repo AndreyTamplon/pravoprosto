@@ -324,6 +324,9 @@ export const submitAnswer = async (sessionId: string, body: { node_id: string; a
 };
 export const retryLesson = async (courseId: string, lessonId: string) =>
   normalizeStep(await post<Record<string, unknown>>(`/student/courses/${courseId}/lessons/${lessonId}/retry`));
+export const abandonLessonSession = async (sessionId: string): Promise<void> => {
+  await post<Record<string, unknown>>(`/student/lesson-sessions/${sessionId}/abandon`);
+};
 export const claimGuardianLink = (token: string) => post<void>('/student/guardian-links/claim', { token });
 export const claimCourseLink = (token: string) => post<void>('/student/course-links/claim', { token });
 export const createPurchaseRequest = (offerId: string) => post<void>(`/student/offers/${offerId}/purchase-requests`);

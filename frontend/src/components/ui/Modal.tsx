@@ -40,7 +40,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
             <button
               className={styles.closeBtn}
               onClick={onClose}
-              aria-label="Close"
+              aria-label="Close dialog"
               type="button"
             >
               ✕

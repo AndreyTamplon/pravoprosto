@@ -6,6 +6,7 @@ interface HudBarProps {
   progress: number;
   xp: number;
   streak: number;
+  disabled?: boolean;
 }
 
 export function HudBar({
@@ -13,6 +14,7 @@ export function HudBar({
   progress,
   xp,
   streak,
+  disabled,
 }: HudBarProps) {
   return (
     <div className={styles.hud}>
@@ -20,7 +22,9 @@ export function HudBar({
         className={styles.closeBtn}
         onClick={onClose}
         aria-label="Close"
+        data-role="hud-close"
         type="button"
+        disabled={disabled}
       >
         ✕
       </button>
