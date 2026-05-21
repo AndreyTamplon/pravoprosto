@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getCourseTree, createPurchaseRequest } from '../../api/client';
+import { getCourseTree, createPurchaseRequest, retryLesson } from '../../api/client';
 import { Button, Badge, Spinner, EmptyState } from '../../components/ui';
 import { formatPrice } from '../../utils/format';
 import type { LessonNode, LessonAccessState } from '../../api/types';
@@ -37,6 +37,8 @@ function LessonNodeItem({
 }) {
   const navigate = useNavigate();
   const [requesting, setRequesting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   const accessState = node.access.access_state;
@@ -49,6 +51,25 @@ function LessonNodeItem({
   const handleStart = () => {
     navigate(`/student/courses/${courseId}/lessons/${node.lesson_id}`);
   };
+
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await retryLesson(courseId, node.lesson_id);
+      navigate(`/student/courses/${courseId}/lessons/${node.lesson_id}`);
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Не удалось перезапустить этап');
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  // Only `active` (free/granted) nodes are clickable. Completed nodes use the explicit «Пройти заново»
+  // button — clicking the ✓ circle directly would create a new session without an obvious user intent
+  // and inflate `lesson_progress.replay_count` (see decisions D-2).
+  const handleNodeClick = isActive ? handleStart : undefined;
 
   const handlePurchase = async () => {
     if (!offer || requesting) return;
@@ -71,7 +92,7 @@ function LessonNodeItem({
 
       <div
         className={`${styles.node} ${appearance.cls}`}
-        onClick={isActive ? handleStart : undefined}
+        onClick={handleNodeClick}
         role={isActive ? 'button' : undefined}
         tabIndex={isActive ? 0 : undefined}
       >
@@ -87,6 +108,23 @@ function LessonNodeItem({
           <Button variant="primary" size="sm" onClick={handleStart}>
             {hasProgress ? 'Продолжить' : 'Начать миссию'}
           </Button>
+        </div>
+      )}
+
+      {isCompleted && (
+        <div className={styles.nodeAction}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRetry}
+            disabled={retrying}
+            data-role="lesson-retry-tree"
+          >
+            {retrying ? 'Перезапуск...' : 'Пройти заново'}
+          </Button>
+          {retryError && (
+            <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 4 }}>{retryError}</div>
+          )}
         </div>
       )}
 
