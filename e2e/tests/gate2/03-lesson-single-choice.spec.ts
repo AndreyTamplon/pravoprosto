@@ -60,9 +60,6 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await expect(page.locator('[data-node-kind="story"]')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-role="prompt"]')).toContainText('подозрительный интернет-магазин');
 
-    const heartsBefore = await page.locator('[data-role="hearts"]').getAttribute('data-remaining');
-    expect(heartsBefore).toBe('5');
-
     await page.getByRole('button', { name: 'Далее' }).click();
     await expect(page.locator('[data-node-kind="single_choice"]')).toBeVisible();
     await expect(page.locator('[data-role="prompt"]')).toContainText('Что сделаешь сначала?');
@@ -73,10 +70,8 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     const feedback = page.locator('[data-role="feedback"]');
     await expect(feedback).toBeVisible({ timeout: 10000 });
     await expect(feedback).toHaveAttribute('data-verdict', 'incorrect');
-    await expect(feedback).toContainText('Неправильно');
+    await expect(feedback).toContainText('ПРОМАХ!');
     await expect(feedback).toContainText('Сначала проверь');
-    await expect(page.getByText('-1 ❤️')).toBeVisible();
-    await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', '4');
 
     await page.getByRole('button', { name: 'Далее' }).click();
     await expect(page.locator('[data-node-kind="story"]')).toBeVisible();
@@ -88,7 +83,6 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
 
     await openLessonAttempt(page, courseId, lessonId);
     await expect(page.locator('[data-node-kind="story"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', '4');
     await page.getByRole('button', { name: 'Далее' }).click();
     await page.getByRole('button', { name: 'Проверю отзывы и сравню цену' }).click();
     await page.getByRole('button', { name: 'Проверить', exact: true }).click();
@@ -176,7 +170,6 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
 
     await openLessonAttempt(page, courseId, lessonId);
     await expect(page.locator('[data-node-kind="single_choice"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-role="xp"]')).toHaveAttribute('data-value', '0');
 
     await page.getByRole('button', { name: 'Правильный ответ', exact: true }).click();
     await page.getByRole('button', { name: 'Проверить', exact: true }).click();
@@ -185,11 +178,9 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
     await expect(feedback).toBeVisible({ timeout: 10000 });
     await expect(feedback).toHaveAttribute('data-verdict', 'correct');
     await expect(feedback).toContainText('+10 XP');
-    await expect(page.locator('[data-role="xp"]')).toHaveAttribute('data-value', '10');
 
     await page.getByRole('button', { name: 'Далее' }).click();
     await expect(page.locator('[data-role="lesson-complete"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-role="lesson-complete"]')).toContainText('+10');
 
     await context.close();
   });
@@ -244,8 +235,7 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
       answerText: string,
       verdict: 'correct' | 'partial' | 'incorrect',
       expectedBranch: string,
-      expectedXpText: string,
-      expectedHearts: string,
+      expectedRewardText: string,
     ) => {
       await openLessonAttempt(page, courseId, lessonId);
       await expect(page.locator('[data-node-kind="single_choice"]')).toBeVisible({ timeout: 10000 });
@@ -255,8 +245,7 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
       const feedback = page.locator('[data-role="feedback"]');
       await expect(feedback).toBeVisible({ timeout: 10000 });
       await expect(feedback).toHaveAttribute('data-verdict', verdict);
-      await expect(feedback).toContainText(expectedXpText);
-      await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', expectedHearts);
+      await expect(feedback).toContainText(expectedRewardText);
 
       await page.getByRole('button', { name: 'Далее' }).click();
       await expect(page.locator('[data-role="prompt"]')).toContainText(expectedBranch);
@@ -266,10 +255,10 @@ test.describe('Gate 2 -- Single-choice branching runtime', () => {
       await expect(page.locator('[data-role="lesson-complete"]')).toBeVisible({ timeout: 10000 });
     };
 
-    await verifyOutcome('Проверить отзывы', 'correct', 'Полностью правильная ветка.', '+10 XP', '5');
-    await verifyOutcome('Сравнить цену с другими магазинами', 'correct', 'Полностью правильная ветка.', '+10 XP', '5');
-    await verifyOutcome('Посмотреть только красивый дизайн сайта', 'partial', 'Почти правильная ветка.', '+5 XP', '5');
-    await verifyOutcome('Сразу оплатить заказ', 'incorrect', 'Неправильная ветка.', '-1 ❤️', '4');
+    await verifyOutcome('Проверить отзывы', 'correct', 'Полностью правильная ветка.', '+10 XP');
+    await verifyOutcome('Сравнить цену с другими магазинами', 'correct', 'Полностью правильная ветка.', '+10 XP');
+    await verifyOutcome('Посмотреть только красивый дизайн сайта', 'partial', 'Почти правильная ветка.', '+5 XP');
+    await verifyOutcome('Сразу оплатить заказ', 'incorrect', 'Неправильная ветка.', 'ПРОМАХ!');
     await context.close();
   });
 });

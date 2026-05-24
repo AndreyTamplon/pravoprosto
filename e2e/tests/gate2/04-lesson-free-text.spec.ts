@@ -58,8 +58,7 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       verdict: 'correct' | 'partial' | 'incorrect',
       expectedFeedback: string,
       branchText: string,
-      expectedHearts: string,
-      expectedXpText: string,
+      expectedRewardText: string,
     ) => {
       await openLessonAttempt(page, courseId, lessonId);
       await page.getByRole('button', { name: 'Далее' }).click();
@@ -71,8 +70,7 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       await expect(feedback).toBeVisible({ timeout: 15000 });
       await expect(feedback).toHaveAttribute('data-verdict', verdict);
       await expect(feedback).toContainText(expectedFeedback);
-      await expect(feedback).toContainText(expectedXpText);
-      await expect(page.locator('[data-role="hearts"]')).toHaveAttribute('data-remaining', expectedHearts);
+      await expect(feedback).toContainText(expectedRewardText);
 
       await page.getByRole('button', { name: 'Далее' }).click();
       await expect(page.locator('[data-node-kind="story"]')).toBeVisible();
@@ -88,7 +86,6 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       'correct',
       'Отлично, ты указал ключевой риск.',
       'Верный маршрут',
-      '5',
       '+10 XP',
     );
     await verifyBranch(
@@ -96,7 +93,6 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       'partial',
       'Ход мысли верный, но ответ пока неполный.',
       'Частично верный маршрут',
-      '5',
       '+5 XP',
     );
     await verifyBranch(
@@ -104,8 +100,7 @@ test.describe('Gate 2 -- Free-text branching runtime', () => {
       'incorrect',
       'Ответ не объясняет основной риск.',
       'Неверный маршрут',
-      '4',
-      '-1 ❤️',
+      'ПРОМАХ!',
     );
     await context.close();
   });

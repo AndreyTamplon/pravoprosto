@@ -7,17 +7,12 @@ import {
   submitAnswer,
   chooseDecision,
   goBackInLesson,
-  getGameState,
   retryLesson,
   abandonLessonSession,
 } from '../../api/client';
 import { generateIdempotencyKey } from '../../utils/format';
-import { HudBar, Button, SpeechBubble, ComicBurst, Modal } from '../../components/ui';
-import type {
-  StepView,
-  AnswerOutcome,
-  GameState,
-} from '../../api/types';
+import { Button, ComicPanel, Badge, ProgressBar, Modal, Spinner } from '../../components/ui';
+import type { StepView, AnswerOutcome } from '../../api/types';
 import styles from './LessonPlayer.module.css';
 
 /* ===== Types for internal state machine ===== */
@@ -33,39 +28,6 @@ type PlayerScreen =
   | { kind: 'complete'; completion: Record<string, unknown> | null }
   | { kind: 'error'; message: string };
 
-/* ===== Confetti helper ===== */
-const CONFETTI_COLORS = ['#F97316', '#0D9488', '#EC4899', '#3B82F6', '#84CC16', '#EAB308'];
-
-function Confetti() {
-  const pieces = Array.from({ length: 40 }, (_, i) => ({
-    id: i,
-    left: `${Math.random() * 100}%`,
-    delay: `${Math.random() * 2}s`,
-    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-    rotation: Math.random() * 360,
-    size: 8 + Math.random() * 10,
-  }));
-
-  return (
-    <div className={styles.confettiWrap}>
-      {pieces.map((p) => (
-        <div
-          key={p.id}
-          className={styles.confetti}
-          style={{
-            left: p.left,
-            animationDelay: p.delay,
-            backgroundColor: p.color,
-            width: p.size,
-            height: p.size,
-            transform: `rotate(${p.rotation}deg)`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 /* ===== Main Component ===== */
 export default function LessonPlayer() {
   const { courseId, lessonId } = useParams<{ courseId: string; lessonId: string }>();
@@ -74,10 +36,6 @@ export default function LessonPlayer() {
   // Session state
   const [currentStep, setCurrentStep] = useState<StepView | null>(null);
   const [screen, setScreen] = useState<PlayerScreen>({ kind: 'loading' });
-  const [gameState, setGameState] = useState<GameState | null>(null);
-
-  // Accumulated XP for this session
-  const [sessionXp, setSessionXp] = useState(0);
 
   // Answer state
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
@@ -89,16 +47,6 @@ export default function LessonPlayer() {
 
   // Idempotency
   const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
-
-  // Timer
-  const startTimeRef = useRef<number>(Date.now());
-
-  // Load game state
-  useEffect(() => {
-    getGameState().then(setGameState).catch((err) => {
-      console.error('Failed to load game state:', err);
-    });
-  }, []);
 
   // Initialize session
   const initSession = useCallback(async () => {
@@ -113,7 +61,6 @@ export default function LessonPlayer() {
         step = await startLesson(courseId, lessonId);
       }
       setCurrentStep(step);
-      startTimeRef.current = Date.now();
       transitionToStep(step);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start lesson';
@@ -195,12 +142,6 @@ export default function LessonPlayer() {
         },
         idempotencyKeyRef.current,
       );
-
-      // Track XP
-      setSessionXp((x) => x + result.xp_delta);
-
-      // Update game state from the answer outcome
-      setCurrentStep((step) => (step ? { ...step, game_state: result.game_state } : step));
 
       // Update current step if next_step is present
       if (result.next_step) {
@@ -306,9 +247,7 @@ export default function LessonPlayer() {
     setSubmitting(true);
     try {
       const step = await retryLesson(courseId, lessonId);
-      setSessionXp(0);
       setCurrentStep(step);
-      startTimeRef.current = Date.now();
       transitionToStep(step);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось перезапустить этап';
@@ -318,13 +257,6 @@ export default function LessonPlayer() {
     }
   };
 
-  // Compute elapsed time
-  const elapsedSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-
-  // Render HudBar
-  const xp = currentStep?.game_state?.xp_total ?? gameState?.xp_total ?? 0;
-  const streak = gameState?.current_streak_days ?? 0;
   const progress = currentStep ? Math.round(currentStep.progress_ratio * 100) : 0;
 
   // Extract payload helpers
@@ -343,249 +275,229 @@ export default function LessonPlayer() {
       : currentStep?.navigation?.can_go_back,
   );
 
-  return (
-    <div className={styles.playerLayout}>
-      <HudBar
-        onClose={handleClose}
-        progress={progress}
-        xp={xp}
-        streak={streak}
-        disabled={submitting}
-      />
+  const completion = screen.kind === 'complete' ? screen.completion : null;
+  const endText = typeof completion?.end_text === 'string' ? (completion.end_text as string) : '';
 
-      <div className={styles.body}>
+  return (
+    <div className={styles.page}>
+      <div className={styles.topBar}>
+        <button
+          className={styles.closeBtn}
+          onClick={handleClose}
+          aria-label="Close"
+          data-role="hud-close"
+          type="button"
+          disabled={submitting}
+        >
+          ✕
+        </button>
+        <div className={styles.progressWrap}>
+          <ProgressBar value={progress} height={12} showLabel />
+        </div>
+      </div>
+
+      <div className={styles.playerArea}>
         {/* Loading */}
         {screen.kind === 'loading' && (
-          <div className={styles.loadingScreen}>
-            <div className={styles.loadingShield}>🛡️</div>
-            <div className={styles.loadingText}>Загружаем миссию...</div>
-          </div>
-        )}
-
-        {/* Story */}
-        {screen.kind === 'story' && (
-          <div className={styles.storyScreen} data-node-kind="story" data-role="current-node">
-            {illustrationUrl && (
-              <div className={styles.storyIllustration}>
-                <img
-                  src={illustrationUrl}
-                  alt="Иллюстрация"
-                  style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }}
-                />
-              </div>
-            )}
-            {!illustrationUrl && (
-              <div className={styles.storyIllustration}>📖</div>
-            )}
-
-            <SpeechBubble direction="bottom">
-              {storySpeaker && (
-                <div className={styles.storySpeaker}>{storySpeaker}</div>
-              )}
-              <div className={styles.storyText} data-role="prompt">{storyText}</div>
-            </SpeechBubble>
-
-            <div className={styles.storyActions}>
-              {canGoBack && (
-                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
-                  Назад к выбору
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                onClick={handleStoryNext}
-                disabled={submitting}
-              >
-                {submitting ? 'Загрузка...' : 'Далее'}
-              </Button>
+          <ComicPanel>
+            <div className={styles.centerState}>
+              <Spinner />
+              <div className={styles.centerStateText}>Загружаем миссию...</div>
             </div>
-          </div>
-        )}
-
-        {/* Single Choice */}
-        {screen.kind === 'single_choice' && (
-          <div className={styles.questionScreen} data-node-kind="single_choice" data-role="current-node">
-            {illustrationUrl && (
-              <div className={styles.questionIllustration}>
-                <img src={illustrationUrl} alt="Иллюстрация" style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />
-              </div>
-            )}
-
-            <div className={styles.questionText} data-role="prompt">
-              {questionText}
-            </div>
-
-            <div className={styles.options}>
-              {(options ?? []).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  data-role="option"
-                  data-option-id={opt.id}
-                  className={[
-                    styles.option,
-                    selectedOption === opt.id ? styles.optionSelected : '',
-                    submitting ? styles.optionDisabled : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => !submitting && setSelectedOption(opt.id)}
-                >
-                  {opt.text}
-                </button>
-              ))}
-            </div>
-
-            <div className={styles.submitRow}>
-              <Button
-                variant="primary"
-                onClick={handleSubmitAnswer}
-                disabled={!selectedOption || submitting}
-              >
-                Проверить
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {screen.kind === 'decision' && (
-          <div className={styles.questionScreen} data-node-kind="decision" data-role="current-node">
-            <div className={styles.questionText} data-role="prompt">
-              {questionText}
-            </div>
-
-            <div className={styles.options}>
-              {(options ?? []).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  data-role="option"
-                  data-option-id={opt.id}
-                  className={[
-                    styles.option,
-                    selectedOption === opt.id ? styles.optionSelected : '',
-                    submitting ? styles.optionDisabled : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => !submitting && setSelectedOption(opt.id)}
-                >
-                  {opt.text}
-                </button>
-              ))}
-            </div>
-
-            <div className={styles.submitRow}>
-              {canGoBack && (
-                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
-                  Назад к выбору
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                onClick={handleDecision}
-                disabled={!selectedOption || submitting}
-              >
-                Выбрать
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Free Text */}
-        {screen.kind === 'free_text' && (
-          <div className={styles.questionScreen} data-node-kind="free_text" data-role="current-node">
-            {illustrationUrl && (
-              <div className={styles.questionIllustration}>
-                <img src={illustrationUrl} alt="Иллюстрация" style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />
-              </div>
-            )}
-
-            <div className={styles.questionText} data-role="prompt">
-              {questionText}
-            </div>
-
-            <textarea
-              className={styles.freeTextArea}
-              placeholder="Напиши свой ответ..."
-              value={freeTextValue}
-              onChange={(e) => setFreeTextValue(e.target.value)}
-              disabled={submitting}
-            />
-
-            <div className={styles.submitRow}>
-              <Button
-                variant="primary"
-                onClick={handleSubmitAnswer}
-                disabled={!freeTextValue.trim() || submitting}
-              >
-                Проверить
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Terminal node */}
-        {screen.kind === 'end' && (
-          <div className={styles.storyScreen} data-node-kind="end" data-role="current-node">
-            <SpeechBubble direction="bottom">
-              <div className={styles.storyText} data-role="prompt">
-                {storyText || 'Миссия завершена!'}
-              </div>
-            </SpeechBubble>
-
-            <div className={styles.storyActions}>
-              {canGoBack && (
-                <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
-                  Назад к выбору
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                onClick={handleEndComplete}
-                disabled={submitting}
-              >
-                Завершить миссию
-              </Button>
-            </div>
-          </div>
+          </ComicPanel>
         )}
 
         {/* Checking (LLM evaluation) */}
         {screen.kind === 'checking' && (
-          <div className={styles.loadingScreen}>
-            <div className={styles.loadingShield}>🛡️</div>
-            <div className={styles.loadingText}>Проверяем ответ...</div>
-          </div>
+          <ComicPanel>
+            <div className={styles.centerState}>
+              <Spinner />
+              <div className={styles.centerStateText}>Проверяем ответ...</div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Story */}
+        {screen.kind === 'story' && (
+          <ComicPanel>
+            <div className={styles.stepCard} data-node-kind="story" data-role="current-node">
+              <Badge variant="teal">История</Badge>
+              {illustrationUrl && (
+                <img src={illustrationUrl} alt="Иллюстрация" className={styles.illustration} />
+              )}
+              {storySpeaker && <div className={styles.speaker}>{storySpeaker}</div>}
+              <div className={styles.storyText} data-role="prompt">{storyText}</div>
+              <div className={styles.actionBar}>
+                {canGoBack && (
+                  <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
+                    Назад к выбору
+                  </Button>
+                )}
+                <Button variant="primary" onClick={handleStoryNext} disabled={submitting}>
+                  {submitting ? 'Загрузка...' : 'Далее'}
+                </Button>
+              </div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Single Choice */}
+        {screen.kind === 'single_choice' && (
+          <ComicPanel>
+            <div className={styles.stepCard} data-node-kind="single_choice" data-role="current-node">
+              <Badge variant="orange">Вопрос</Badge>
+              {illustrationUrl && (
+                <img src={illustrationUrl} alt="Иллюстрация" className={styles.illustration} />
+              )}
+              <div className={styles.questionText} data-role="prompt">{questionText}</div>
+              <div className={styles.optionsList}>
+                {(options ?? []).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    data-role="option"
+                    data-option-id={opt.id}
+                    className={`${styles.optionBtn} ${selectedOption === opt.id ? styles.optionSelected : ''}`}
+                    onClick={() => !submitting && setSelectedOption(opt.id)}
+                    disabled={submitting}
+                  >
+                    {opt.text}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.actionBar}>
+                <Button variant="primary" onClick={handleSubmitAnswer} disabled={!selectedOption || submitting}>
+                  Проверить
+                </Button>
+              </div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Decision */}
+        {screen.kind === 'decision' && (
+          <ComicPanel>
+            <div className={styles.stepCard} data-node-kind="decision" data-role="current-node">
+              <Badge variant="teal">Развилка</Badge>
+              <div className={styles.questionText} data-role="prompt">{questionText}</div>
+              <div className={styles.optionsList}>
+                {(options ?? []).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    data-role="option"
+                    data-option-id={opt.id}
+                    className={`${styles.optionBtn} ${selectedOption === opt.id ? styles.optionSelected : ''}`}
+                    onClick={() => !submitting && setSelectedOption(opt.id)}
+                    disabled={submitting}
+                  >
+                    {opt.text}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.actionBar}>
+                {canGoBack && (
+                  <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
+                    Назад к выбору
+                  </Button>
+                )}
+                <Button variant="primary" onClick={handleDecision} disabled={!selectedOption || submitting}>
+                  Выбрать
+                </Button>
+              </div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Free Text */}
+        {screen.kind === 'free_text' && (
+          <ComicPanel>
+            <div className={styles.stepCard} data-node-kind="free_text" data-role="current-node">
+              <Badge variant="pink">Свободный ответ</Badge>
+              {illustrationUrl && (
+                <img src={illustrationUrl} alt="Иллюстрация" className={styles.illustration} />
+              )}
+              <div className={styles.questionText} data-role="prompt">{questionText}</div>
+              <textarea
+                className={styles.freeTextInput}
+                placeholder="Напиши свой ответ..."
+                value={freeTextValue}
+                onChange={(e) => setFreeTextValue(e.target.value)}
+                disabled={submitting}
+              />
+              <div className={styles.actionBar}>
+                <Button variant="primary" onClick={handleSubmitAnswer} disabled={!freeTextValue.trim() || submitting}>
+                  Проверить
+                </Button>
+              </div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Terminal node */}
+        {screen.kind === 'end' && (
+          <ComicPanel>
+            <div className={styles.stepCard} data-node-kind="end" data-role="current-node">
+              <Badge variant="lime">Финал</Badge>
+              <div className={styles.storyText} data-role="prompt">{storyText || 'Миссия завершена!'}</div>
+              <div className={styles.actionBar}>
+                {canGoBack && (
+                  <Button variant="outline" onClick={handleGoBack} disabled={submitting}>
+                    Назад к выбору
+                  </Button>
+                )}
+                <Button variant="primary" onClick={handleEndComplete} disabled={submitting}>
+                  Завершить миссию
+                </Button>
+              </div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Feedback */}
+        {screen.kind === 'feedback' && (
+          <ComicPanel>
+            <div className={styles.stepCard}>
+              <div
+                className={`${styles.feedback} ${
+                  screen.result.verdict === 'correct'
+                    ? styles.feedbackCorrect
+                    : screen.result.verdict === 'partial'
+                    ? styles.feedbackPartial
+                    : styles.feedbackIncorrect
+                }`}
+                data-role="feedback"
+                data-verdict={screen.result.verdict}
+              >
+                <div className={styles.feedbackVerdict}>
+                  {screen.result.verdict === 'correct'
+                    ? 'ВЕРНО!'
+                    : screen.result.verdict === 'partial'
+                    ? 'ПОЧТИ!'
+                    : 'ПРОМАХ!'}
+                </div>
+                <div className={styles.feedbackText}>{screen.result.feedback_text}</div>
+                {screen.result.xp_delta > 0 && (
+                  <div className={styles.feedbackXp}>+{screen.result.xp_delta} XP ⭐</div>
+                )}
+              </div>
+              <div className={styles.actionBar}>
+                <Button variant={screen.result.verdict === 'correct' ? 'teal' : 'primary'} onClick={handleFeedbackNext}>
+                  Далее
+                </Button>
+              </div>
+            </div>
+          </ComicPanel>
         )}
 
         {/* Lesson Complete */}
         {screen.kind === 'complete' && (
-          <>
-            <Confetti />
-            <div className={styles.completeScreen} data-role="lesson-complete">
-              <div className={styles.completeMascot}>🎉🤖🏆</div>
+          <ComicPanel>
+            <div className={styles.completeWrap} data-role="lesson-complete">
+              <div className={styles.completeMascot}>🎉</div>
               <div className={styles.completeTitle}>Миссия выполнена!</div>
-              {typeof screen.completion?.end_text === 'string' && screen.completion.end_text.trim() !== '' && (
-                <div className={styles.completeSummary}>{screen.completion.end_text as string}</div>
-              )}
-
-              <div className={styles.completeStats}>
-                <div className={styles.completeStat}>
-                  <div className={styles.completeStatValue} style={{ color: 'var(--teal)' }}>
-                    +{sessionXp}
-                  </div>
-                  <div className={styles.completeStatLabel}>XP</div>
-                </div>
-                <div className={styles.completeStat}>
-                  <div className={styles.completeStatValue} style={{ color: 'var(--orange)' }}>
-                    {elapsedMinutes}м
-                  </div>
-                  <div className={styles.completeStatLabel}>Время</div>
-                </div>
-              </div>
-
-              <div className={styles.completeActions}>
+              {endText.trim() !== '' && <div className={styles.completeSummary}>{endText}</div>}
+              <div className={styles.actionBar}>
                 <Button variant="primary" onClick={handleRetry} disabled={submitting} data-role="lesson-retry">
                   Пройти заново
                 </Button>
@@ -597,67 +509,24 @@ export default function LessonPlayer() {
                 </Button>
               </div>
             </div>
-          </>
+          </ComicPanel>
         )}
 
         {/* Error */}
         {screen.kind === 'error' && (
-          <div className={styles.errorScreen}>
-            <div style={{ fontSize: '3rem' }}>⚠️</div>
-            <div style={{ fontWeight: 700 }}>Что-то пошло не так</div>
-            <div style={{ color: 'var(--dark-light)', fontSize: '0.9rem' }}>{screen.message}</div>
-            <Button variant="outline" onClick={initSession}>
-              Попробовать снова
-            </Button>
-            <Button variant="outline" onClick={handleClose}>
-              Назад
-            </Button>
-          </div>
+          <ComicPanel>
+            <div className={styles.centerState}>
+              <div className={styles.errorIcon}>⚠️</div>
+              <div className={styles.centerStateText}>Что-то пошло не так</div>
+              <div className={styles.errorMessage}>{screen.message}</div>
+              <div className={styles.actionBar}>
+                <Button variant="outline" onClick={initSession}>Попробовать снова</Button>
+                <Button variant="outline" onClick={handleClose}>Назад</Button>
+              </div>
+            </div>
+          </ComicPanel>
         )}
       </div>
-
-      {/* Feedback Overlay */}
-        {screen.kind === 'feedback' && (
-        <div className={styles.feedbackOverlay}>
-          <div
-            className={[
-              styles.feedbackPanel,
-              screen.result.verdict === 'correct'
-                ? styles.feedbackCorrect
-                : screen.result.verdict === 'partial'
-                ? styles.feedbackPartial
-                : styles.feedbackIncorrect,
-            ].join(' ')}
-            data-role="feedback"
-            data-verdict={screen.result.verdict}
-          >
-            <div className={styles.feedbackBurst}>
-              <ComicBurst>
-                {screen.result.verdict === 'correct'
-                  ? 'ВЕРНО!'
-                  : screen.result.verdict === 'partial'
-                  ? 'ПОЧТИ!'
-                  : 'ПРОМАХ!'}
-              </ComicBurst>
-            </div>
-
-            <div className={styles.feedbackText}>{screen.result.feedback_text}</div>
-
-            {screen.result.xp_delta > 0 && (
-              <div className={styles.feedbackXp}>+{screen.result.xp_delta} XP ⭐</div>
-            )}
-
-            <div className={styles.feedbackAction}>
-              <Button
-                variant={screen.result.verdict === 'correct' ? 'teal' : 'primary'}
-                onClick={handleFeedbackNext}
-              >
-                Далее
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <Modal
         open={confirmExitOpen}

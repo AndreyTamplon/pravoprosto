@@ -1,328 +1,275 @@
-/* ===== Layout ===== */
-.playerLayout {
+/* ===== Layout (mirrors the preview player for a consistent look) ===== */
+.page {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
 }
 
-.body {
-  flex: 1;
+.topBar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px 20px 0;
+}
+
+.closeBtn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px 20px 120px;
-  width: 100%;
-  max-width: 600px;
-  margin: 0 auto;
-  position: relative;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--dark-light);
+  background: var(--white);
+  border: var(--border-thin);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition), color var(--transition);
 }
 
-/* ===== Story Screen ===== */
-.storyScreen {
+.closeBtn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-comic-xs);
+  color: var(--dark);
+}
+
+.closeBtn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.progressWrap {
+  flex: 1;
+}
+
+.playerArea {
+  flex: 1;
   width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+  animation: screenIn 0.4s ease-out;
+}
+
+@keyframes screenIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Step card ===== */
+.stepCard {
+  min-height: 200px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  animation: floatUp 0.4s ease;
+  gap: 16px;
 }
 
-.storyIllustration {
-  text-align: center;
-  font-size: 4rem;
-  padding: 16px 0;
+.illustration {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  border: var(--border-thin);
+}
+
+.speaker {
+  font-weight: 800;
+  color: var(--teal);
+  font-size: 0.95rem;
+  margin-bottom: -8px;
 }
 
 .storyText {
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   line-height: 1.7;
-}
-
-.storySpeaker {
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--teal);
-  margin-bottom: 4px;
-  letter-spacing: 0.5px;
-}
-
-.storyActions {
-  display: flex;
-  justify-content: center;
-  margin-top: 8px;
-}
-
-/* ===== Question Screen ===== */
-.questionScreen {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  animation: floatUp 0.4s ease;
+  color: var(--dark);
+  white-space: pre-wrap;
 }
 
 .questionText {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   font-weight: 700;
+  color: var(--dark);
   line-height: 1.5;
-  text-align: center;
-}
-
-.questionIllustration {
-  text-align: center;
-  font-size: 3rem;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 /* ===== Options ===== */
-.options {
+.optionsList {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
-.option {
-  padding: 16px 20px;
-  background: var(--white);
-  border: var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
+.optionBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 18px;
+  font-family: var(--font-family);
   font-size: 1rem;
   font-weight: 600;
-  text-align: left;
-  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition), background var(--transition);
-  box-shadow: var(--shadow-comic-sm);
-  line-height: 1.4;
+  color: var(--dark);
+  background: var(--white);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-comic-xs);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition), background var(--transition), border-color var(--transition);
 }
 
-.option:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-comic);
+.optionBtn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-comic-sm);
 }
 
 .optionSelected {
-  border-color: var(--blue);
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2), var(--shadow-comic-sm);
+  border-color: var(--teal);
+  background: rgba(13, 148, 136, 0.08);
 }
 
-.optionDisabled {
-  pointer-events: none;
-  opacity: 0.7;
+.optionBtn:disabled {
+  cursor: default;
 }
 
-/* ===== Free Text ===== */
-.freeTextArea {
+/* ===== Free text answer ===== */
+.freeTextInput {
   width: 100%;
-  min-height: 120px;
-  padding: 16px;
+  min-height: 110px;
+  padding: 14px;
+  border: var(--border);
+  border-radius: var(--radius-sm);
   font-family: var(--font-family);
   font-size: 1rem;
-  border: var(--border);
-  border-radius: var(--radius);
-  background: var(--white);
-  box-shadow: var(--shadow-comic-xs);
   resize: vertical;
   outline: none;
   transition: border-color var(--transition);
-  line-height: 1.5;
 }
 
-.freeTextArea:focus {
+.freeTextInput:focus {
   border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.2), var(--shadow-comic-xs);
 }
 
-.submitRow {
-  display: flex;
-  justify-content: center;
-  margin-top: 8px;
-}
-
-/* ===== Feedback Panel ===== */
-.feedbackOverlay {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 200;
-  animation: slideUp 0.35s ease;
-}
-
-.feedbackPanel {
-  padding: 28px 24px;
-  border-top: 2px solid var(--border-thick);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  text-align: center;
+/* ===== Feedback ===== */
+.feedback {
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  border: var(--border);
+  font-weight: 600;
 }
 
 .feedbackCorrect {
-  background: #dcfce7;
-  border-top-color: var(--lime-dark);
+  background: #DCFCE7;
+  border-color: var(--lime);
+  color: #166534;
 }
 
 .feedbackIncorrect {
-  background: #fee2e2;
-  border-top-color: var(--red-dark);
+  background: #FEE2E2;
+  border-color: var(--red);
+  color: var(--red-dark);
 }
 
 .feedbackPartial {
-  background: #fef9c3;
-  border-top-color: var(--orange);
+  background: #FEF3C7;
+  border-color: var(--yellow);
+  color: #92400E;
 }
 
-.feedbackBurst {
-  margin-bottom: 4px;
+.feedbackVerdict {
+  font-weight: 800;
+  font-size: 1.05rem;
+  margin-bottom: 6px;
 }
 
 .feedbackText {
-  font-size: 0.95rem;
   line-height: 1.6;
-  max-width: 480px;
-  color: var(--dark-mid);
 }
 
 .feedbackXp {
-  font-size: 1.1rem;
+  margin-top: 8px;
   font-weight: 800;
   color: var(--teal);
 }
 
-.feedbackAction {
-  margin-top: 4px;
+/* ===== Action buttons ===== */
+.actionBar {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-/* ===== Lesson Complete ===== */
-.completeScreen {
-  width: 100%;
+/* ===== Completed ===== */
+.completeWrap {
   text-align: center;
-  animation: bounceIn 0.6s ease;
+  padding: 24px 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
-}
-
-.confettiWrap {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 100;
-  overflow: hidden;
-}
-
-.confetti {
-  position: absolute;
-  top: -20px;
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-  animation: confettiFall 3s ease-in forwards;
+  gap: 12px;
 }
 
 .completeMascot {
-  font-size: 5rem;
+  font-size: 3.5rem;
 }
 
 .completeTitle {
-  font-size: 2rem;
+  font-size: 1.6rem;
   font-weight: 800;
   color: var(--teal);
 }
 
 .completeSummary {
-  max-width: 520px;
-  text-align: center;
+  max-width: 480px;
   font-size: 1rem;
   line-height: 1.5;
   color: var(--dark-light);
 }
 
-.completeStats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  width: 100%;
-  max-width: 360px;
-}
-
-.completeStat {
-  background: var(--white);
-  border: var(--border);
-  border-radius: var(--radius-sm);
-  padding: 16px 8px;
-  box-shadow: var(--shadow-comic-xs);
-}
-
-.completeStatValue {
-  font-size: 1.5rem;
-  font-weight: 800;
-}
-
-.completeStatLabel {
-  font-size: 0.75rem;
-  color: var(--gray-500);
-  font-weight: 600;
-  text-transform: uppercase;
-  margin-top: 2px;
-}
-
-.completeActions {
-  display: flex;
-  gap: 16px;
-  margin-top: 8px;
-}
-
-/* ===== Loading / LLM check ===== */
-.loadingScreen {
-  text-align: center;
+/* ===== Center states (loading / checking / error) ===== */
+.centerState {
+  min-height: 160px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
 }
 
-.loadingShield {
-  font-size: 3rem;
-  animation: spinShield 1.5s linear infinite;
-}
-
-.loadingText {
-  font-weight: 600;
+.centerStateText {
+  font-weight: 700;
   color: var(--dark-light);
 }
 
-/* ===== Error state ===== */
-.errorScreen {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
+.errorIcon {
+  font-size: 2.5rem;
+}
+
+.errorMessage {
+  font-size: 0.9rem;
+  color: var(--dark-light);
+  max-width: 420px;
 }
 
 @media (max-width: 600px) {
-  .body {
-    padding: 20px 16px 100px;
-    justify-content: flex-start;
-    padding-top: 24px;
+  .playerArea {
+    padding: 16px 16px 80px;
   }
 
   .questionText {
     font-size: 1rem;
   }
 
-  .completeStats {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-  }
-
-  .completeActions {
+  .actionBar {
     flex-direction: column;
     width: 100%;
   }

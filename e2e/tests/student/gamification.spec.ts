@@ -5,17 +5,15 @@ import { createFreshStudentPage, openLessonAttempt } from '../../helpers/student
 test.use({ storageState: '.auth/student.json' });
 
 test.describe('Student -- Gamification (HUD, XP, hearts)', () => {
-  test('HUD bar shows XP and hearts during lesson', async ({ browser }) => {
+  test('lesson player shows a progress bar and step content in a card', async ({ browser }) => {
     const { platformCourseId } = fixtures;
-    const { context, page } = await createFreshStudentPage(browser, 'gamification-hud');
+    const { context, page } = await createFreshStudentPage(browser, 'player-layout');
     await openLessonAttempt(page, platformCourseId, 'lesson_phishing');
     await expect(page.getByText(/Тебе пришло сообщение/)).toBeVisible({ timeout: 10000 });
 
-    // HudBar renders: "♥ N/M" for hearts and "★ N" for XP
-    await expect(page.getByText(/♥\s*\d+\/\d+/)).toBeVisible();
-    await expect(page.getByText(/★\s*\d+/)).toBeVisible();
-    // Streak indicator
-    await expect(page.getByText(/🔥\s*\d+/)).toBeVisible();
+    // Preview-style player: a light progress bar at the top and step content in a card.
+    await expect(page.locator('[class*="progressWrap"]')).toBeVisible();
+    await expect(page.locator('[data-role="current-node"]')).toBeVisible();
     await context.close();
   });
 
@@ -45,7 +43,6 @@ test.describe('Student -- Gamification (HUD, XP, hearts)', () => {
     await page.getByRole('button', { name: /Перейду по ссылке/ }).click();
     await page.getByRole('button', { name: 'Проверить' }).click();
     await expect(page.getByText('ПРОМАХ!', { exact: true })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/-\d+\s*❤/)).toBeVisible();
     await context.close();
   });
 
