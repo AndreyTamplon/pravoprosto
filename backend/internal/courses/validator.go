@@ -291,6 +291,66 @@ func collectTargets(node map[string]any, basePath string, nodeIndex int, errors 
 			}
 		}
 	case "free_text":
+		rubric, _ := node["rubric"].(map[string]any)
+		nodePath := fmt.Sprintf("%s.nodes[%d]", basePath, nodeIndex)
+		if outcomesRaw, hasOutcomes := rubric["outcomes"].([]any); hasOutcomes {
+			if len(outcomesRaw) == 0 {
+				*errors = append(*errors, ValidationError{
+					Path:    nodePath + ".rubric.outcomes",
+					Code:    "missing_outcomes",
+					Message: "Free text node must define at least one outcome",
+				})
+			}
+			hasCorrect := false
+			for outcomeIndex, rawOutcome := range outcomesRaw {
+				outcome, _ := rawOutcome.(map[string]any)
+				verdict := asString(outcome["verdict"])
+				nextID := asString(outcome["nextNodeId"])
+				if asString(outcome["id"]) == "" || asString(outcome["criteria"]) == "" ||
+					asString(outcome["feedback"]) == "" || nextID == "" || !isValidVerdict(verdict) {
+					*errors = append(*errors, ValidationError{
+						Path:    fmt.Sprintf("%s.rubric.outcomes[%d]", nodePath, outcomeIndex),
+						Code:    "invalid_outcome",
+						Message: "Free text outcome must define id, criteria, verdict (correct/partial/incorrect), feedback, and nextNodeId",
+					})
+				}
+				if verdict == "correct" {
+					hasCorrect = true
+				}
+				if nextID != "" {
+					targets = append(targets, nextID)
+				}
+			}
+			if !hasCorrect {
+				*errors = append(*errors, ValidationError{
+					Path:    nodePath + ".rubric.outcomes",
+					Code:    "missing_correct_outcome",
+					Message: "Free text node must define at least one correct outcome",
+				})
+			}
+			defaultOutcome, hasDefault := rubric["defaultOutcome"].(map[string]any)
+			if !hasDefault {
+				*errors = append(*errors, ValidationError{
+					Path:    nodePath + ".rubric.defaultOutcome",
+					Code:    "missing_default_outcome",
+					Message: "Free text node must define a default outcome for unmatched answers",
+				})
+			} else {
+				defaultNext := asString(defaultOutcome["nextNodeId"])
+				if asString(defaultOutcome["feedback"]) == "" || defaultNext == "" || !isValidVerdict(asString(defaultOutcome["verdict"])) {
+					*errors = append(*errors, ValidationError{
+						Path:    nodePath + ".rubric.defaultOutcome",
+						Code:    "invalid_default_outcome",
+						Message: "Default outcome must define verdict (correct/partial/incorrect), feedback, and nextNodeId",
+					})
+				}
+				if defaultNext != "" {
+					targets = append(targets, defaultNext)
+				}
+			}
+			break
+		}
+		// Legacy verdict-based format: three fixed transitions + criteriaByVerdict.
 		transitions, _ := node["transitions"].([]any)
 		found := map[string]bool{}
 		for transitionIndex, rawTransition := range transitions {
@@ -299,7 +359,7 @@ func collectTargets(node map[string]any, basePath string, nodeIndex int, errors 
 			nextID := asString(transition["nextNodeId"])
 			if verdict == "" || nextID == "" {
 				*errors = append(*errors, ValidationError{
-					Path:    fmt.Sprintf("%s.nodes[%d].transitions[%d]", basePath, nodeIndex, transitionIndex),
+					Path:    fmt.Sprintf("%s.transitions[%d]", nodePath, transitionIndex),
 					Code:    "invalid_transition",
 					Message: "Free text transition must define onVerdict and nextNodeId",
 				})
@@ -311,13 +371,13 @@ func collectTargets(node map[string]any, basePath string, nodeIndex int, errors 
 		for _, verdict := range []string{"correct", "partial", "incorrect"} {
 			if !found[verdict] {
 				*errors = append(*errors, ValidationError{
-					Path:    fmt.Sprintf("%s.nodes[%d]", basePath, nodeIndex),
+					Path:    nodePath,
 					Code:    "missing_transition",
 					Message: "Free text node must define transitions for all three verdicts",
 				})
 			}
 		}
-		validateFreeTextRubric(node, fmt.Sprintf("%s.nodes[%d]", basePath, nodeIndex), errors)
+		validateFreeTextRubric(node, nodePath, errors)
 	case "end":
 	default:
 		*errors = append(*errors, ValidationError{
@@ -337,6 +397,10 @@ func asString(value any) string {
 func asBool(value any) bool {
 	boolean, _ := value.(bool)
 	return boolean
+}
+
+func isValidVerdict(verdict string) bool {
+	return verdict == "correct" || verdict == "partial" || verdict == "incorrect"
 }
 
 func hasCorrectOption(options []any) bool {

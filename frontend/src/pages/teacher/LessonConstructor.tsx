@@ -14,6 +14,7 @@ import type {
   ChoiceOption,
   GraphVerdict,
   DecisionOption,
+  FreeTextOutcome,
 } from '../../api/types';
 import {
   graphToBackendFormat,
@@ -21,7 +22,8 @@ import {
   isBackendLessonGraph,
   normalizeLessonGraph,
   optionEdgeCondition,
-  verdictEdgeCondition,
+  outcomeEdgeCondition,
+  FREE_TEXT_DEFAULT_OUTCOME_ID,
   getGraphEdgeTarget,
   setGraphEdgeTarget,
   getForwardTargetNodes,
@@ -55,12 +57,8 @@ interface DecisionData {
 interface FreeTextData {
   question_text: string;
   reference_answer: string;
-  criteria_correct: string;
-  criteria_partial: string;
-  criteria_incorrect: string;
-  feedback_correct: string;
-  feedback_partial: string;
-  feedback_incorrect: string;
+  outcomes: FreeTextOutcome[];
+  default_outcome: { verdict: GraphVerdict; feedback: string };
 }
 
 function storyData(node: GraphNode): StoryData {
@@ -104,17 +102,35 @@ function decisionData(node: GraphNode): DecisionData {
 }
 
 function freeTextData(node: GraphNode): FreeTextData {
-  const legacyCriteria = (node.data.criteria as string) ?? '';
-  const legacyFeedback = (node.data.feedback_text as string) ?? '';
+  const rawOutcomes = node.data.outcomes as Array<Record<string, unknown>> | undefined;
+  let outcomes: FreeTextOutcome[];
+  if (Array.isArray(rawOutcomes) && rawOutcomes.length > 0) {
+    outcomes = rawOutcomes.map(outcome => ({
+      outcome_id: ((outcome.outcome_id ?? outcome.id) as string) ?? '',
+      criteria: (outcome.criteria as string) ?? '',
+      verdict: ((outcome.verdict as string) || 'incorrect') as GraphVerdict,
+      feedback: (outcome.feedback as string) ?? '',
+    }));
+  } else {
+    // Fallback for any legacy editor-format draft with per-verdict fields.
+    const legacyCriteria = (node.data.criteria as string) ?? '';
+    const legacyFeedback = (node.data.feedback_text as string) ?? '';
+    outcomes = (['correct', 'partial', 'incorrect'] as GraphVerdict[]).map(verdict => ({
+      outcome_id: verdict,
+      criteria: (node.data[`criteria_${verdict}`] as string) ?? legacyCriteria,
+      verdict,
+      feedback: (node.data[`feedback_${verdict}`] as string) ?? legacyFeedback,
+    }));
+  }
+  const rawDefault = node.data.default_outcome as Record<string, unknown> | undefined;
   return {
     question_text: (node.data.question_text as string) ?? '',
     reference_answer: (node.data.reference_answer as string) ?? '',
-    criteria_correct: (node.data.criteria_correct as string) ?? legacyCriteria,
-    criteria_partial: (node.data.criteria_partial as string) ?? legacyCriteria,
-    criteria_incorrect: (node.data.criteria_incorrect as string) ?? legacyCriteria,
-    feedback_correct: (node.data.feedback_correct as string) ?? legacyFeedback,
-    feedback_partial: (node.data.feedback_partial as string) ?? legacyFeedback,
-    feedback_incorrect: (node.data.feedback_incorrect as string) ?? legacyFeedback,
+    outcomes,
+    default_outcome: {
+      verdict: ((rawDefault?.verdict as string) || 'incorrect') as GraphVerdict,
+      feedback: (rawDefault?.feedback as string) ?? ((node.data.feedback_incorrect as string) ?? ''),
+    },
   };
 }
 
@@ -124,6 +140,12 @@ const nodeTypeLabels: Record<string, { label: string; color: 'blue' | 'orange' |
   free_text: { label: 'Свободный ответ', color: 'pink' },
   decision: { label: 'Развилка сюжета', color: 'teal' },
   terminal: { label: 'Завершение', color: 'lime' },
+};
+
+const verdictLabels: Record<GraphVerdict, string> = {
+  correct: 'Правильный',
+  partial: 'Почти правильный',
+  incorrect: 'Неправильный',
 };
 
 function isPlaceholderGraph(graph: LessonGraph): boolean {
@@ -191,12 +213,11 @@ function createNode(type: GraphNode['type']): GraphNode {
       data: {
         question_text: '',
         reference_answer: '',
-        criteria_correct: '',
-        criteria_partial: '',
-        criteria_incorrect: '',
-        feedback_correct: '',
-        feedback_partial: '',
-        feedback_incorrect: '',
+        outcomes: [
+          { outcome_id: genId(), criteria: '', verdict: 'correct', feedback: '' },
+          { outcome_id: genId(), criteria: '', verdict: 'incorrect', feedback: '' },
+        ],
+        default_outcome: { verdict: 'incorrect', feedback: '' },
       },
     };
   }
@@ -423,10 +444,58 @@ export default function LessonConstructor() {
     }));
   };
 
-  const setFreeTextNextNode = (nodeId: string, verdict: GraphVerdict, targetId: string) => {
+  const setOutcomeNextNode = (nodeId: string, outcomeId: string, targetId: string) => {
     updateGraph(prev => ({
       ...prev,
-      edges: setGraphEdgeTarget(prev.edges, nodeId, verdictEdgeCondition(verdict), targetId),
+      edges: setGraphEdgeTarget(prev.edges, nodeId, outcomeEdgeCondition(outcomeId), targetId),
+    }));
+  };
+
+  const addOutcome = (nodeId: string) => {
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const outcomes = freeTextData(node).outcomes;
+        const nextOutcome: FreeTextOutcome = { outcome_id: genId(), criteria: '', verdict: 'correct', feedback: '' };
+        return { ...node, data: { ...node.data, outcomes: [...outcomes, nextOutcome] } };
+      }),
+    }));
+  };
+
+  const removeOutcome = (nodeId: string, outcomeId: string) => {
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const outcomes = freeTextData(node).outcomes.filter(outcome => outcome.outcome_id !== outcomeId);
+        return { ...node, data: { ...node.data, outcomes } };
+      }),
+      edges: prev.edges.filter(edge => !(edge.from === nodeId && edge.condition === outcomeEdgeCondition(outcomeId))),
+    }));
+  };
+
+  const updateOutcome = (nodeId: string, outcomeId: string, patch: Partial<FreeTextOutcome>) => {
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const outcomes = freeTextData(node).outcomes.map(outcome =>
+          outcome.outcome_id === outcomeId ? { ...outcome, ...patch } : outcome,
+        );
+        return { ...node, data: { ...node.data, outcomes } };
+      }),
+    }));
+  };
+
+  const updateDefaultOutcome = (nodeId: string, patch: Partial<FreeTextData['default_outcome']>) => {
+    updateGraph(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => {
+        if (node.id !== nodeId) return node;
+        const defaultOutcome = { ...freeTextData(node).default_outcome, ...patch };
+        return { ...node, data: { ...node.data, default_outcome: defaultOutcome } };
+      }),
     }));
   };
 
@@ -444,11 +513,16 @@ export default function LessonConstructor() {
       });
     }
     if (node.type === 'free_text') {
-      return (['correct', 'partial', 'incorrect'] as GraphVerdict[]).flatMap(verdict => {
-        const targetId = getGraphEdgeTarget(edges, node.id, verdictEdgeCondition(verdict));
+      const lines = freeTextData(node).outcomes.flatMap(outcome => {
+        const targetId = getGraphEdgeTarget(edges, node.id, outcomeEdgeCondition(outcome.outcome_id));
         if (!targetId) return [];
-        return [`${verdict} -> ${nodeDisplayLabel(nodes, targetId)}`];
+        return [`${outcome.criteria || verdictLabels[outcome.verdict]} -> ${nodeDisplayLabel(nodes, targetId)}`];
       });
+      const defaultTarget = getGraphEdgeTarget(edges, node.id, outcomeEdgeCondition(FREE_TEXT_DEFAULT_OUTCOME_ID));
+      if (defaultTarget) {
+        lines.push(`Иначе -> ${nodeDisplayLabel(nodes, defaultTarget)}`);
+      }
+      return lines;
     }
     return [];
   };
@@ -769,90 +843,104 @@ export default function LessonConstructor() {
                         rows={2}
                       />
                       <div style={{ border: 'var(--border-thin)', borderRadius: '12px', padding: '12px 14px', background: 'rgba(13,148,136,0.06)' }}>
-                        <div style={{ fontWeight: 800, marginBottom: 6 }}>Как писать критерии оценивания</div>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>Как задавать исходы</div>
                         <div style={{ fontSize: '0.92rem', lineHeight: 1.5 }}>
-                          Пишите наблюдаемые признаки ответа, а не общие формулировки. Для `правильно` укажите, какие мысли ответ обязан содержать.
-                          Для `почти правильно` опишите, чего в ответе уже хватает, но что ещё отсутствует. Для `неверно` перечислите типичные упущения или неверные идеи.
+                          Добавьте сколько нужно исходов. Для каждого опишите критерий (когда он засчитывается),
+                          выберите статус (он влияет на баллы) и обратную связь. ИИ подберёт подходящий исход по ответу ученика.
+                          Нужен хотя бы один «правильный». «Иначе» сработает, если ответ не подошёл ни под один критерий.
                         </div>
                       </div>
-                      <Textarea
-                        label="Критерии правильного ответа"
-                        value={data.criteria_correct}
-                        onChange={e => updateNodeData(node.id, 'criteria_correct', e.target.value)}
-                        placeholder="Что обязательно должно быть в сильном ответе..."
-                        rows={2}
-                      />
-                      <Textarea
-                        label="Критерии частично верного ответа"
-                        value={data.criteria_partial}
-                        onChange={e => updateNodeData(node.id, 'criteria_partial', e.target.value)}
-                        placeholder="Что уже неплохо, но ещё не дотягивает до полного ответа..."
-                        rows={2}
-                      />
-                      <Textarea
-                        label="Критерии неверного ответа"
-                        value={data.criteria_incorrect}
-                        onChange={e => updateNodeData(node.id, 'criteria_incorrect', e.target.value)}
-                        placeholder="Какие ответы считаем неверными или не по делу..."
-                        rows={2}
-                      />
-                      <Textarea
-                        label="Обратная связь при правильном ответе"
-                        value={data.feedback_correct}
-                        onChange={e => updateNodeData(node.id, 'feedback_correct', e.target.value)}
-                        placeholder="Что увидит ученик при правильном ответе..."
-                        rows={2}
-                      />
-                      <Textarea
-                        label="Обратная связь при частично верном ответе"
-                        value={data.feedback_partial}
-                        onChange={e => updateNodeData(node.id, 'feedback_partial', e.target.value)}
-                        placeholder="Что увидит ученик при частично верном ответе..."
-                        rows={2}
-                      />
-                      <Textarea
-                        label="Обратная связь при неправильном ответе"
-                        value={data.feedback_incorrect}
-                        onChange={e => updateNodeData(node.id, 'feedback_incorrect', e.target.value)}
-                        placeholder="Что увидит ученик при неправильном ответе..."
-                        rows={2}
-                      />
-                      <Select
-                        label="Следующий блок при правильном ответе"
-                        value={getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('correct'))}
-                        onChange={event => setFreeTextNextNode(node.id, 'correct', event.target.value)}
-                      >
-                        <option value="">Выберите следующий блок</option>
-                        {getForwardTargetNodes(nodes, node.id).map(target => (
-                          <option key={target.id} value={target.id}>
-                            {nodeDisplayLabel(nodes, target.id)}
-                          </option>
-                        ))}
-                      </Select>
-                      <Select
-                        label="Следующий блок при частично верном ответе"
-                        value={getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('partial'))}
-                        onChange={event => setFreeTextNextNode(node.id, 'partial', event.target.value)}
-                      >
-                        <option value="">Выберите следующий блок</option>
-                        {getForwardTargetNodes(nodes, node.id).map(target => (
-                          <option key={target.id} value={target.id}>
-                            {nodeDisplayLabel(nodes, target.id)}
-                          </option>
-                        ))}
-                      </Select>
-                      <Select
-                        label="Следующий блок при неправильном ответе"
-                        value={getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('incorrect'))}
-                        onChange={event => setFreeTextNextNode(node.id, 'incorrect', event.target.value)}
-                      >
-                        <option value="">Выберите следующий блок</option>
-                        {getForwardTargetNodes(nodes, node.id).map(target => (
-                          <option key={target.id} value={target.id}>
-                            {nodeDisplayLabel(nodes, target.id)}
-                          </option>
-                        ))}
-                      </Select>
+                      <div>
+                        <div style={{ fontWeight: 700, marginBottom: 8 }}>Исходы ответа</div>
+                        <div className={s.optionsList}>
+                          {data.outcomes.map(outcome => (
+                            <div key={outcome.outcome_id} className={s.optionBlock}>
+                              <div className={s.optionRow}>
+                                <Textarea
+                                  label="Критерий"
+                                  value={outcome.criteria}
+                                  onChange={e => updateOutcome(node.id, outcome.outcome_id, { criteria: e.target.value })}
+                                  placeholder="Когда этот исход засчитывается..."
+                                  rows={2}
+                                />
+                                {data.outcomes.length > 1 && (
+                                  <button
+                                    className={s.removeOptionBtn}
+                                    onClick={() => removeOutcome(node.id, outcome.outcome_id)}
+                                    type="button"
+                                    aria-label="Удалить исход"
+                                    title="Удалить исход"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                              <Select
+                                label="Статус"
+                                value={outcome.verdict}
+                                onChange={event => updateOutcome(node.id, outcome.outcome_id, { verdict: event.target.value as GraphVerdict })}
+                              >
+                                <option value="correct">Правильный</option>
+                                <option value="partial">Почти правильный</option>
+                                <option value="incorrect">Неправильный</option>
+                              </Select>
+                              <Textarea
+                                label="Обратная связь для этого исхода"
+                                value={outcome.feedback}
+                                onChange={e => updateOutcome(node.id, outcome.outcome_id, { feedback: e.target.value })}
+                                placeholder="Что увидит ученик при этом исходе..."
+                                rows={2}
+                              />
+                              <Select
+                                label="Переход после этого исхода"
+                                value={getGraphEdgeTarget(edges, node.id, outcomeEdgeCondition(outcome.outcome_id))}
+                                onChange={event => setOutcomeNextNode(node.id, outcome.outcome_id, event.target.value)}
+                              >
+                                <option value="">Выберите следующий блок</option>
+                                {getForwardTargetNodes(nodes, node.id).map(target => (
+                                  <option key={target.id} value={target.id}>
+                                    {nodeDisplayLabel(nodes, target.id)}
+                                  </option>
+                                ))}
+                              </Select>
+                            </div>
+                          ))}
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={() => addOutcome(node.id)} style={{ marginTop: 8 }}>
+                          + Исход
+                        </Button>
+                      </div>
+                      <div className={s.optionBlock}>
+                        <div style={{ fontWeight: 700, marginBottom: 8 }}>Иначе — ответ не подошёл ни под один критерий</div>
+                        <Select
+                          label="Статус"
+                          value={data.default_outcome.verdict}
+                          onChange={event => updateDefaultOutcome(node.id, { verdict: event.target.value as GraphVerdict })}
+                        >
+                          <option value="correct">Правильный</option>
+                          <option value="partial">Почти правильный</option>
+                          <option value="incorrect">Неправильный</option>
+                        </Select>
+                        <Textarea
+                          label="Обратная связь"
+                          value={data.default_outcome.feedback}
+                          onChange={e => updateDefaultOutcome(node.id, { feedback: e.target.value })}
+                          placeholder="Что увидит ученик, если ответ не подошёл ни под один критерий..."
+                          rows={2}
+                        />
+                        <Select
+                          label="Переход в этом случае"
+                          value={getGraphEdgeTarget(edges, node.id, outcomeEdgeCondition(FREE_TEXT_DEFAULT_OUTCOME_ID))}
+                          onChange={event => setOutcomeNextNode(node.id, FREE_TEXT_DEFAULT_OUTCOME_ID, event.target.value)}
+                        >
+                          <option value="">Выберите следующий блок</option>
+                          {getForwardTargetNodes(nodes, node.id).map(target => (
+                            <option key={target.id} value={target.id}>
+                              {nodeDisplayLabel(nodes, target.id)}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
                     </div>
                   );
                 })()}

@@ -71,16 +71,21 @@ test.describe('QA Regression -- Lesson editor roundtrip for new branching model'
     await optionTargets.nth(3).selectOption({ label: '#4 Блок истории' });
 
     await page.getByLabel('Эталонный ответ').fill('Проверка помогает заметить мошенников.');
-    await page.getByLabel('Критерии правильного ответа').fill('Нужно упомянуть риск мошенничества и проверку магазина.');
-    await page.getByLabel('Критерии частично верного ответа').fill('Есть идея о проверке, но нет полного объяснения риска.');
-    await page.getByLabel('Критерии неверного ответа').fill('Ответ не объясняет, зачем вообще проверять магазин.');
-    await page.getByLabel('Обратная связь при правильном ответе').fill('Отлично, ты назвал ключевой риск.');
-    await page.getByLabel('Обратная связь при частично верном ответе').fill('Ход мысли хороший, но ответ пока неполный.');
-    await page.getByLabel('Обратная связь при неправильном ответе').fill('Ответ пока не объясняет главную опасность.');
-
-    await page.getByLabel('Следующий блок при правильном ответе').selectOption({ label: '#4 Блок истории' });
-    await page.getByLabel('Следующий блок при частично верном ответе').selectOption({ label: '#5 Завершение' });
-    await page.getByLabel('Следующий блок при неправильном ответе').selectOption({ label: '#5 Завершение' });
+    // The free_text node starts with two outcomes: [0] correct, [1] incorrect.
+    const outcomeCriteria = page.getByLabel('Критерий');
+    await outcomeCriteria.nth(0).fill('Нужно упомянуть риск мошенничества и проверку магазина.');
+    await outcomeCriteria.nth(1).fill('Ответ не объясняет, зачем вообще проверять магазин.');
+    const outcomeStatus = page.getByLabel('Статус', { exact: true });
+    await outcomeStatus.nth(0).selectOption('correct');
+    await outcomeStatus.nth(1).selectOption('incorrect');
+    const outcomeFeedback = page.getByLabel('Обратная связь для этого исхода');
+    await outcomeFeedback.nth(0).fill('Отлично, ты назвал ключевой риск.');
+    await outcomeFeedback.nth(1).fill('Ответ пока не объясняет главную опасность.');
+    const outcomeTargets = page.getByLabel('Переход после этого исхода');
+    await outcomeTargets.nth(0).selectOption({ label: '#4 Блок истории' });
+    await outcomeTargets.nth(1).selectOption({ label: '#5 Завершение' });
+    await page.getByLabel('Обратная связь', { exact: true }).fill('Ответ не подошёл ни под один критерий.');
+    await page.getByLabel('Переход в этом случае').selectOption({ label: '#5 Завершение' });
 
     await page.getByLabel('Текст истории').nth(1).fill('Финальная ветка после проверок.');
     await page.getByLabel('Следующий блок').nth(1).selectOption({ label: '#5 Завершение' });
@@ -108,13 +113,16 @@ test.describe('QA Regression -- Lesson editor roundtrip for new branching model'
     const freeTextNode = nodes.find(node => node.kind === 'free_text');
     expect(freeTextNode).toBeTruthy();
     const rubric = (freeTextNode?.rubric as Record<string, unknown>) ?? {};
-    expect((rubric.criteriaByVerdict as Record<string, unknown>).correct).toBe('Нужно упомянуть риск мошенничества и проверку магазина.');
-    expect((rubric.feedbackByVerdict as Record<string, unknown>).partial).toBe('Ход мысли хороший, но ответ пока неполный.');
+    const outcomes = (rubric.outcomes as Array<Record<string, unknown>>) ?? [];
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes.find(outcome => outcome.verdict === 'correct')?.criteria).toBe('Нужно упомянуть риск мошенничества и проверку магазина.');
+    expect(outcomes.find(outcome => outcome.verdict === 'incorrect')?.feedback).toBe('Ответ пока не объясняет главную опасность.');
+    expect(rubric.defaultOutcome).toBeTruthy();
 
     await page.reload();
     await expect(page.getByPlaceholder('Название этапа...')).toHaveValue('Урок ветвления v3');
-    await expect(page.getByLabel('Критерии правильного ответа')).toHaveValue('Нужно упомянуть риск мошенничества и проверку магазина.');
-    await expect(page.getByLabel('Обратная связь при частично верном ответе')).toHaveValue('Ход мысли хороший, но ответ пока неполный.');
+    await expect(page.getByLabel('Критерий').nth(0)).toHaveValue('Нужно упомянуть риск мошенничества и проверку магазина.');
+    await expect(page.getByLabel('Обратная связь для этого исхода').nth(0)).toHaveValue('Отлично, ты назвал ключевой риск.');
 
     await page.getByRole('button', { name: 'Предпросмотр' }).click();
     await page.waitForURL(/\/teacher\/preview\/.+/);

@@ -20,21 +20,31 @@ type lessonGraph struct {
 }
 
 type graphNode struct {
-	ID          string
-	Kind        string
-	NextNodeID  string
-	Prompt      string
-	Text        string
-	AssetURL    string
-	Options     []graphOption
-	Transitions map[string]string
-	Rubric      map[string]any
+	ID             string
+	Kind           string
+	NextNodeID     string
+	Prompt         string
+	Text           string
+	AssetURL       string
+	Options        []graphOption
+	Transitions    map[string]string
+	Rubric         map[string]any
+	Outcomes       []graphOutcome
+	DefaultOutcome *graphOutcome
 }
 
 type graphOption struct {
 	ID         string
 	Text       string
 	Result     string
+	Feedback   string
+	NextNodeID string
+}
+
+type graphOutcome struct {
+	ID         string
+	Criteria   string
+	Verdict    string
 	Feedback   string
 	NextNodeID string
 }
@@ -131,6 +141,9 @@ func parseGraph(raw any) lessonGraph {
 				node.Transitions[asString(transitionMap["onVerdict"])] = asString(transitionMap["nextNodeId"])
 			}
 		}
+		if node.Kind == "free_text" {
+			node.Outcomes, node.DefaultOutcome = freeTextOutcomes(node.Rubric, node.Transitions)
+		}
 		nodeMap[node.ID] = node
 		order = append(order, node.ID)
 	}
@@ -139,6 +152,69 @@ func parseGraph(raw any) lessonGraph {
 		NodeMap:     nodeMap,
 		Order:       order,
 	}
+}
+
+// freeTextOutcomes normalizes a free_text rubric into a flat outcome list plus a
+// default ("else") outcome, converting the legacy verdict-based format on the fly.
+func freeTextOutcomes(rubric map[string]any, transitions map[string]string) ([]graphOutcome, *graphOutcome) {
+	if rubric == nil {
+		return nil, nil
+	}
+	if rawOutcomes, ok := rubric["outcomes"].([]any); ok {
+		outcomes := make([]graphOutcome, 0, len(rawOutcomes))
+		for _, raw := range rawOutcomes {
+			outcomeMap, _ := raw.(map[string]any)
+			outcomes = append(outcomes, graphOutcome{
+				ID:         asString(outcomeMap["id"]),
+				Criteria:   asString(outcomeMap["criteria"]),
+				Verdict:    asString(outcomeMap["verdict"]),
+				Feedback:   asString(outcomeMap["feedback"]),
+				NextNodeID: asString(outcomeMap["nextNodeId"]),
+			})
+		}
+		var defaultOutcome *graphOutcome
+		if rawDefault, ok := rubric["defaultOutcome"].(map[string]any); ok {
+			defaultOutcome = &graphOutcome{
+				ID:         "none",
+				Verdict:    asString(rawDefault["verdict"]),
+				Feedback:   asString(rawDefault["feedback"]),
+				NextNodeID: asString(rawDefault["nextNodeId"]),
+			}
+		}
+		return outcomes, defaultOutcome
+	}
+	legacyCriteria := asString(rubric["criteria"])
+	outcomes := make([]graphOutcome, 0, 3)
+	for _, verdict := range []string{"correct", "partial", "incorrect"} {
+		outcomes = append(outcomes, graphOutcome{
+			ID:         verdict,
+			Criteria:   firstNonEmpty(asString(mapNestedValue(rubric, "criteriaByVerdict", verdict)), legacyCriteria),
+			Verdict:    verdict,
+			Feedback:   asString(mapNestedValue(rubric, "feedbackByVerdict", verdict)),
+			NextNodeID: transitions[verdict],
+		})
+	}
+	defaultOutcome := &graphOutcome{
+		ID:         "none",
+		Verdict:    "incorrect",
+		Feedback:   asString(mapNestedValue(rubric, "feedbackByVerdict", "incorrect")),
+		NextNodeID: transitions["incorrect"],
+	}
+	return outcomes, defaultOutcome
+}
+
+// findGraphOutcome returns the outcome with the given id, or nil if the id is
+// empty, "none", or not present (the caller falls back to the default outcome).
+func findGraphOutcome(outcomes []graphOutcome, id string) *graphOutcome {
+	if id == "" || id == "none" {
+		return nil
+	}
+	for i := range outcomes {
+		if outcomes[i].ID == id {
+			return &outcomes[i]
+		}
+	}
+	return nil
 }
 
 func buildStepView(sessionID string, courseID string, lessonID string, stateVersion int64, graph lessonGraph, currentID string, node graphNode) StepView {

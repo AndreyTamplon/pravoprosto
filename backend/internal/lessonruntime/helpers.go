@@ -20,21 +20,33 @@ type runtimeGraph struct {
 }
 
 type runtimeNode struct {
-	ID          string
-	Kind        string
-	NextNodeID  string
-	Text        string
-	AssetURL    string
-	Prompt      string
-	Options     []runtimeOption
-	Transitions map[string]string
-	Rubric      map[string]any
+	ID             string
+	Kind           string
+	NextNodeID     string
+	Text           string
+	AssetURL       string
+	Prompt         string
+	Options        []runtimeOption
+	Transitions    map[string]string
+	Rubric         map[string]any
+	Outcomes       []runtimeOutcome
+	DefaultOutcome *runtimeOutcome
 }
 
 type runtimeOption struct {
 	ID         string
 	Text       string
 	Result     string
+	Feedback   string
+	NextNodeID string
+}
+
+// runtimeOutcome is one author-defined branch of a free_text question:
+// the LLM matches the answer to an outcome, and its verdict drives scoring.
+type runtimeOutcome struct {
+	ID         string
+	Criteria   string
+	Verdict    string
 	Feedback   string
 	NextNodeID string
 }
@@ -467,6 +479,9 @@ func parseGraph(raw any) runtimeGraph {
 		if rubric, ok := nodeMap["rubric"].(map[string]any); ok {
 			node.Rubric = rubric
 		}
+		if node.Kind == "free_text" {
+			node.Outcomes, node.DefaultOutcome = freeTextOutcomes(node.Rubric, node.Transitions)
+		}
 		graph.Order = append(graph.Order, node.ID)
 		graph.NodeMap[node.ID] = node
 	}
@@ -561,13 +576,19 @@ func (s *Service) evaluateNode(ctx context.Context, node runtimeNode, answer map
 			}
 		}
 	case "free_text":
+		evalOutcomes := make([]evaluation.EvaluationOutcome, 0, len(node.Outcomes))
+		for _, outcome := range node.Outcomes {
+			evalOutcomes = append(evalOutcomes, evaluation.EvaluationOutcome{
+				ID:       outcome.ID,
+				Verdict:  outcome.Verdict,
+				Criteria: outcome.Criteria,
+			})
+		}
 		result, err := s.evaluator.Evaluate(ctx, evaluation.FreeTextEvaluationInput{
-			Prompt:            node.Prompt,
-			ReferenceAnswer:   asStringAny(node.Rubric["referenceAnswer"]),
-			CriteriaCorrect:   firstNonEmptyStringAny(nestedMapValue(node.Rubric, "criteriaByVerdict", "correct"), node.Rubric["criteria"]),
-			CriteriaPartial:   firstNonEmptyStringAny(nestedMapValue(node.Rubric, "criteriaByVerdict", "partial"), node.Rubric["criteria"]),
-			CriteriaIncorrect: firstNonEmptyStringAny(nestedMapValue(node.Rubric, "criteriaByVerdict", "incorrect"), node.Rubric["criteria"]),
-			StudentAnswer:     asStringAny(answer["text"]),
+			Prompt:          node.Prompt,
+			ReferenceAnswer: asStringAny(node.Rubric["referenceAnswer"]),
+			Outcomes:        evalOutcomes,
+			StudentAnswer:   asStringAny(answer["text"]),
 		})
 		if err != nil {
 			if errors.Is(err, evaluation.ErrTemporarilyUnavailable) {
@@ -575,9 +596,16 @@ func (s *Service) evaluateNode(ctx context.Context, node runtimeNode, answer map
 			}
 			return evaluationOutcome{}, err
 		}
-		nextNodeID := node.Transitions[result.Verdict]
-		if nextNodeID == "" {
+		chosen := findRuntimeOutcome(node.Outcomes, result.OutcomeID)
+		if chosen == nil {
+			chosen = node.DefaultOutcome
+		}
+		if chosen == nil || strings.TrimSpace(chosen.NextNodeID) == "" {
 			return evaluationOutcome{}, ErrLessonSessionStateConflict
+		}
+		feedback := strings.TrimSpace(chosen.Feedback)
+		if feedback == "" {
+			feedback = result.Feedback
 		}
 		latency := result.LatencyMS
 		traceID := strings.TrimSpace(result.TraceID)
@@ -586,9 +614,9 @@ func (s *Service) evaluateNode(ctx context.Context, node runtimeNode, answer map
 			tracePtr = &traceID
 		}
 		return evaluationOutcome{
-			Verdict:          result.Verdict,
-			Feedback:         freeTextFeedback(node.Rubric, result.Verdict, result.Feedback),
-			NextNodeID:       nextNodeID,
+			Verdict:          chosen.Verdict,
+			Feedback:         feedback,
+			NextNodeID:       chosen.NextNodeID,
 			EvaluatorType:    "llm_free_text",
 			EvaluatorLatency: &latency,
 			EvaluatorTraceID: tracePtr,
@@ -608,12 +636,70 @@ func nestedMapValue(root map[string]any, key string, nested string) any {
 	return raw[nested]
 }
 
-func freeTextFeedback(rubric map[string]any, verdict string, fallback string) string {
-	feedbackByVerdict, _ := rubric["feedbackByVerdict"].(map[string]any)
-	if feedback := strings.TrimSpace(asStringAny(feedbackByVerdict[verdict])); feedback != "" {
-		return feedback
+// findRuntimeOutcome returns the outcome with the given id, or nil if the id is
+// empty, "none", or not present (the caller then falls back to the default outcome).
+func findRuntimeOutcome(outcomes []runtimeOutcome, id string) *runtimeOutcome {
+	if id == "" || id == "none" {
+		return nil
 	}
-	return fallback
+	for i := range outcomes {
+		if outcomes[i].ID == id {
+			return &outcomes[i]
+		}
+	}
+	return nil
+}
+
+// freeTextOutcomes normalizes a free_text rubric into a flat outcome list plus a
+// default ("else") outcome. New courses store rubric.outcomes directly; legacy
+// courses are converted on the fly from criteriaByVerdict/feedbackByVerdict and
+// the verdict transition map so published content keeps working.
+func freeTextOutcomes(rubric map[string]any, transitions map[string]string) ([]runtimeOutcome, *runtimeOutcome) {
+	if rubric == nil {
+		return nil, nil
+	}
+	if rawOutcomes, ok := rubric["outcomes"].([]any); ok {
+		outcomes := make([]runtimeOutcome, 0, len(rawOutcomes))
+		for _, raw := range rawOutcomes {
+			outcomeMap, _ := raw.(map[string]any)
+			outcomes = append(outcomes, runtimeOutcome{
+				ID:         asStringAny(outcomeMap["id"]),
+				Criteria:   asStringAny(outcomeMap["criteria"]),
+				Verdict:    asStringAny(outcomeMap["verdict"]),
+				Feedback:   asStringAny(outcomeMap["feedback"]),
+				NextNodeID: asStringAny(outcomeMap["nextNodeId"]),
+			})
+		}
+		var defaultOutcome *runtimeOutcome
+		if rawDefault, ok := rubric["defaultOutcome"].(map[string]any); ok {
+			defaultOutcome = &runtimeOutcome{
+				ID:         "none",
+				Verdict:    asStringAny(rawDefault["verdict"]),
+				Feedback:   asStringAny(rawDefault["feedback"]),
+				NextNodeID: asStringAny(rawDefault["nextNodeId"]),
+			}
+		}
+		return outcomes, defaultOutcome
+	}
+	// Legacy format: fixed correct/partial/incorrect verdicts.
+	legacyCriteria := asStringAny(rubric["criteria"])
+	outcomes := make([]runtimeOutcome, 0, 3)
+	for _, verdict := range []string{"correct", "partial", "incorrect"} {
+		outcomes = append(outcomes, runtimeOutcome{
+			ID:         verdict,
+			Criteria:   firstNonEmptyStringAny(nestedMapValue(rubric, "criteriaByVerdict", verdict), legacyCriteria),
+			Verdict:    verdict,
+			Feedback:   asStringAny(nestedMapValue(rubric, "feedbackByVerdict", verdict)),
+			NextNodeID: transitions[verdict],
+		})
+	}
+	defaultOutcome := &runtimeOutcome{
+		ID:         "none",
+		Verdict:    "incorrect",
+		Feedback:   asStringAny(nestedMapValue(rubric, "feedbackByVerdict", "incorrect")),
+		NextNodeID: transitions["incorrect"],
+	}
+	return outcomes, defaultOutcome
 }
 
 func firstNonEmptyStringAny(values ...any) string {

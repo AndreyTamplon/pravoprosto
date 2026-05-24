@@ -20,17 +20,23 @@ type FreeTextEvaluator interface {
 	Evaluate(ctx context.Context, input FreeTextEvaluationInput) (Result, error)
 }
 
+// EvaluationOutcome is a single author-defined outcome the LLM can pick.
+// The verdict label drives scoring; criteria describe when the outcome applies.
+type EvaluationOutcome struct {
+	ID       string
+	Verdict  string
+	Criteria string
+}
+
 type FreeTextEvaluationInput struct {
-	Prompt            string
-	ReferenceAnswer   string
-	CriteriaCorrect   string
-	CriteriaPartial   string
-	CriteriaIncorrect string
-	StudentAnswer     string
+	Prompt          string
+	ReferenceAnswer string
+	Outcomes        []EvaluationOutcome
+	StudentAnswer   string
 }
 
 type Result struct {
-	Verdict   string
+	OutcomeID string
 	Feedback  string
 	TraceID   string
 	Model     string
@@ -57,6 +63,16 @@ func NewOpenAICompatibleAdapter(cfg platformconfig.Config, logger *slog.Logger) 
 	}
 }
 
+func buildFreeTextPrompt(input FreeTextEvaluationInput) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "PROMPT:%s\nREFERENCE:%s\nOUTCOMES:\n", input.Prompt, input.ReferenceAnswer)
+	for _, outcome := range input.Outcomes {
+		fmt.Fprintf(&b, "- id=%s verdict=%s: %s\n", outcome.ID, outcome.Verdict, outcome.Criteria)
+	}
+	fmt.Fprintf(&b, "ANSWER:%s", input.StudentAnswer)
+	return b.String()
+}
+
 func (a *openAICompatibleAdapter) Evaluate(ctx context.Context, input FreeTextEvaluationInput) (Result, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
@@ -70,20 +86,15 @@ func (a *openAICompatibleAdapter) Evaluate(ctx context.Context, input FreeTextEv
 		"messages": []map[string]string{
 			{
 				"role": "system",
-				"content": "Return strict JSON only with keys verdict and feedback. " +
-					"Allowed verdict values: correct, partial, incorrect.",
+				"content": "You grade a student's free-text answer by matching it to exactly one outcome. " +
+					"Each outcome has an id, a verdict label (correct, partial, or incorrect) and criteria describing when it applies. " +
+					"Choose the single outcome whose criteria best fit the answer. " +
+					"Return strict JSON only with keys outcome_id and feedback. " +
+					"outcome_id must be one of the provided ids, or \"none\" if no criteria fit the answer.",
 			},
 			{
-				"role": "user",
-				"content": fmt.Sprintf(
-					"PROMPT:%s\nREFERENCE:%s\nCRITERIA_CORRECT:%s\nCRITERIA_PARTIAL:%s\nCRITERIA_INCORRECT:%s\nANSWER:%s",
-					input.Prompt,
-					input.ReferenceAnswer,
-					input.CriteriaCorrect,
-					input.CriteriaPartial,
-					input.CriteriaIncorrect,
-					input.StudentAnswer,
-				),
+				"role":    "user",
+				"content": buildFreeTextPrompt(input),
 			},
 		},
 		"response_format": map[string]string{"type": "json_object"},
@@ -142,22 +153,21 @@ func (a *openAICompatibleAdapter) Evaluate(ctx context.Context, input FreeTextEv
 	}
 
 	var structured struct {
-		Verdict  string `json:"verdict"`
-		Feedback string `json:"feedback"`
+		OutcomeID string `json:"outcome_id"`
+		Feedback  string `json:"feedback"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(completion.Choices[0].Message.Content)), &structured); err != nil {
 		logger.Warn("failed to decode llm structured content", "err", err, "latency_ms", time.Since(startedAt).Milliseconds())
 		return Result{}, fmt.Errorf("%w: parse structured content", ErrTemporarilyUnavailable)
 	}
-	verdict := strings.TrimSpace(structured.Verdict)
-	if verdict != "correct" && verdict != "partial" && verdict != "incorrect" {
-		logger.Warn("llm returned unsupported verdict", "verdict", verdict, "latency_ms", time.Since(startedAt).Milliseconds())
-		return Result{}, fmt.Errorf("%w: unknown verdict", ErrTemporarilyUnavailable)
+	outcomeID := strings.TrimSpace(structured.OutcomeID)
+	if outcomeID == "" {
+		logger.Warn("llm returned empty outcome_id", "latency_ms", time.Since(startedAt).Milliseconds())
+		return Result{}, fmt.Errorf("%w: empty outcome_id", ErrTemporarilyUnavailable)
 	}
-	feedback := strings.TrimSpace(structured.Feedback)
-	if feedback == "" {
-		logger.Warn("llm returned empty feedback", "latency_ms", time.Since(startedAt).Milliseconds())
-		return Result{}, fmt.Errorf("%w: empty feedback", ErrTemporarilyUnavailable)
+	if outcomeID != "none" && !outcomeIDAllowed(outcomeID, input.Outcomes) {
+		logger.Warn("llm returned unsupported outcome_id", "outcome_id", outcomeID, "latency_ms", time.Since(startedAt).Milliseconds())
+		return Result{}, fmt.Errorf("%w: unknown outcome_id", ErrTemporarilyUnavailable)
 	}
 
 	traceID := strings.TrimSpace(resp.Header.Get("X-Request-Id"))
@@ -169,14 +179,23 @@ func (a *openAICompatibleAdapter) Evaluate(ctx context.Context, input FreeTextEv
 		model = a.model
 	}
 	latencyMS := int(time.Since(startedAt).Milliseconds())
-	logger.Info("llm evaluation completed", "verdict", verdict, "latency_ms", latencyMS, "provider_trace_id", traceID)
+	logger.Info("llm evaluation completed", "outcome_id", outcomeID, "latency_ms", latencyMS, "provider_trace_id", traceID)
 	return Result{
-		Verdict:   verdict,
-		Feedback:  feedback,
+		OutcomeID: outcomeID,
+		Feedback:  strings.TrimSpace(structured.Feedback),
 		TraceID:   traceID,
 		Model:     model,
 		LatencyMS: latencyMS,
 	}, nil
+}
+
+func outcomeIDAllowed(id string, outcomes []EvaluationOutcome) bool {
+	for _, outcome := range outcomes {
+		if outcome.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 var ErrTemporarilyUnavailable = errors.New("llm_temporarily_unavailable")

@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"pravoprost/backend/internal/evaluation"
 )
 
 // ---------------------------------------------------------------------------
@@ -296,34 +298,8 @@ func llmHandler() http.Handler {
 		if len(body.Messages) > 0 {
 			userContent = body.Messages[len(body.Messages)-1].Content
 		}
-		answerContent := userContent
-		if parts := strings.SplitN(userContent, "\nANSWER:", 2); len(parts) == 2 {
-			answerContent = parts[1]
-		}
-
-		lower := strings.ToLower(answerContent)
-
-		mode := "auto"
-		switch {
-		case strings.Contains(lower, "[llm:correct]"):
-			mode = "correct"
-		case strings.Contains(lower, "[llm:partial]"):
-			mode = "partial"
-		case strings.Contains(lower, "[llm:incorrect]"):
-			mode = "incorrect"
-		case strings.Contains(lower, "[llm:malformed]"):
-			mode = "malformed"
-		case strings.Contains(lower, "[llm:unknown]"):
-			mode = "unknown"
-		case strings.Contains(lower, "[llm:500]"):
-			mode = "500"
-		case strings.Contains(lower, "[llm:timeout]"):
-			mode = "timeout"
-		case strings.Contains(lower, "[llm:slow]"):
-			mode = "slow"
-		}
-
-		slog.Info("mock llm request", "model", body.Model, "mode", mode, "answer_len", len(answerContent))
+		mode := evaluation.MockMode(userContent)
+		slog.Info("mock llm request", "model", body.Model, "mode", mode)
 
 		if mode == "500" {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -338,29 +314,7 @@ func llmHandler() http.Handler {
 			time.Sleep(3 * time.Second)
 		}
 
-		content := `{"verdict":"partial","feedback":"Часть ответа верна"}`
-		switch mode {
-		case "correct":
-			content = `{"verdict":"correct","feedback":"Ответ корректный"}`
-		case "partial":
-			content = `{"verdict":"partial","feedback":"Часть ответа верна"}`
-		case "incorrect":
-			content = `{"verdict":"incorrect","feedback":"Ответ неверный"}`
-		case "malformed":
-			content = `{"verdict":`
-		case "unknown":
-			content = `{"verdict":"mystery","feedback":"??"}`
-		default:
-			switch {
-			case strings.Contains(lower, "safe"), strings.Contains(lower, "нельзя"),
-				strings.Contains(lower, "правильн"), strings.Contains(lower, "верн"):
-				content = `{"verdict":"correct","feedback":"Ответ корректный"}`
-			case strings.Contains(lower, "не знаю"), strings.Contains(lower, "может"):
-				content = `{"verdict":"partial","feedback":"Часть ответа верна"}`
-			case strings.Contains(lower, "можно"), strings.Contains(lower, "ничего страшн"):
-				content = `{"verdict":"incorrect","feedback":"Это небезопасно"}`
-			}
-		}
+		content := evaluation.MockLLMContent(userContent)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Request-Id", fmt.Sprintf("mock-llm-%d", time.Now().UnixMilli()))

@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"pravoprost/backend/internal/evaluation"
 	"pravoprost/backend/internal/httpserver"
 	"pravoprost/backend/internal/identity"
 	"pravoprost/backend/internal/platform/config"
@@ -115,31 +115,7 @@ func New(t *testing.T) *TestApp {
 		if len(body.Messages) > 0 {
 			userContent = body.Messages[len(body.Messages)-1].Content
 		}
-		answerContent := userContent
-		if parts := strings.SplitN(userContent, "\nANSWER:", 2); len(parts) == 2 {
-			answerContent = parts[1]
-		}
-		lower := strings.ToLower(answerContent)
-		mode := "auto"
-		switch {
-		case strings.Contains(lower, "[llm:correct]"):
-			mode = "correct"
-		case strings.Contains(lower, "[llm:partial]"):
-			mode = "partial"
-		case strings.Contains(lower, "[llm:incorrect]"):
-			mode = "incorrect"
-		case strings.Contains(lower, "[llm:malformed]"):
-			mode = "malformed"
-		case strings.Contains(lower, "[llm:unknown]"):
-			mode = "unknown"
-		case strings.Contains(lower, "[llm:500]"):
-			mode = "500"
-		case strings.Contains(lower, "[llm:timeout]"):
-			mode = "timeout"
-		case strings.Contains(lower, "[llm:slow]"):
-			mode = "slow"
-		}
-
+		mode := evaluation.MockMode(userContent)
 		if mode == "500" {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"provider_failure"}`))
@@ -151,28 +127,7 @@ func New(t *testing.T) *TestApp {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Request-Id", "fake-llm-request")
-		content := `{"verdict":"partial","feedback":"Часть ответа верна"}`
-		switch mode {
-		case "correct":
-			content = `{"verdict":"correct","feedback":"Ответ корректный"}`
-		case "partial":
-			content = `{"verdict":"partial","feedback":"Часть ответа верна"}`
-		case "incorrect":
-			content = `{"verdict":"incorrect","feedback":"Ответ неверный"}`
-		case "malformed":
-			content = `{"verdict":`
-		case "unknown":
-			content = `{"verdict":"mystery","feedback":"??"}`
-		default:
-			switch {
-			case strings.Contains(lower, "safe"), strings.Contains(lower, "нельзя"):
-				content = `{"verdict":"correct","feedback":"Ответ корректный"}`
-			case strings.Contains(lower, "some idea"), strings.Contains(lower, "idea"):
-				content = `{"verdict":"partial","feedback":"Часть ответа верна"}`
-			default:
-				content = `{"verdict":"partial","feedback":"Часть ответа верна"}`
-			}
-		}
+		content := evaluation.MockLLMContent(userContent)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":    "chatcmpl_fake",
 			"model": "fake-llm",

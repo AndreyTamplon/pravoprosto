@@ -360,8 +360,27 @@ export interface DecisionOption {
   text: string;
 }
 
+// A free_text question is graded by matching the answer to one of these
+// author-defined outcomes; verdict drives scoring, criteria guide the LLM.
+export interface FreeTextOutcome {
+  outcome_id: string;
+  criteria: string;
+  verdict: GraphVerdict;
+  feedback: string;
+}
+
+export interface FreeTextDefaultOutcome {
+  verdict: GraphVerdict;
+  feedback: string;
+}
+
+// Synthetic id for the "else" branch (no outcome matched). Reserved — real
+// outcomes use genId(), so it can never collide.
+export const FREE_TEXT_DEFAULT_OUTCOME_ID = '__default__';
+
 const OPTION_EDGE_PREFIX = 'option:';
 const VERDICT_EDGE_PREFIX = 'verdict:';
+const OUTCOME_EDGE_PREFIX = 'outcome:';
 
 export function optionEdgeCondition(optionId: string): string {
   return `${OPTION_EDGE_PREFIX}${optionId}`;
@@ -369,6 +388,10 @@ export function optionEdgeCondition(optionId: string): string {
 
 export function verdictEdgeCondition(verdict: GraphVerdict): string {
   return `${VERDICT_EDGE_PREFIX}${verdict}`;
+}
+
+export function outcomeEdgeCondition(outcomeId: string): string {
+  return `${OUTCOME_EDGE_PREFIX}${outcomeId}`;
 }
 
 function parseOptionEdgeCondition(condition?: string): string | null {
@@ -379,15 +402,12 @@ function parseOptionEdgeCondition(condition?: string): string | null {
   return optionId || null;
 }
 
-function parseVerdictEdgeCondition(condition?: string): GraphVerdict | null {
-  if (!condition?.startsWith(VERDICT_EDGE_PREFIX)) {
+function parseOutcomeEdgeCondition(condition?: string): string | null {
+  if (!condition?.startsWith(OUTCOME_EDGE_PREFIX)) {
     return null;
   }
-  const verdict = condition.slice(VERDICT_EDGE_PREFIX.length).trim();
-  if (verdict === 'correct' || verdict === 'partial' || verdict === 'incorrect') {
-    return verdict;
-  }
-  return null;
+  const outcomeId = condition.slice(OUTCOME_EDGE_PREFIX.length).trim();
+  return outcomeId || null;
 }
 
 function edgeKey(from: string, condition?: string): string {
@@ -445,7 +465,13 @@ export function getNodeOutputConditions(node: GraphNode): Array<string | undefin
       .map(optionId => optionEdgeCondition(optionId));
   }
   if (node.type === 'free_text') {
-    return (['correct', 'partial', 'incorrect'] as GraphVerdict[]).map(verdict => verdictEdgeCondition(verdict));
+    const outcomes = (node.data.outcomes as Array<{ outcome_id?: string }>) ?? [];
+    const conditions = outcomes
+      .map(outcome => outcome.outcome_id ?? '')
+      .filter(Boolean)
+      .map(outcomeId => outcomeEdgeCondition(outcomeId));
+    conditions.push(outcomeEdgeCondition(FREE_TEXT_DEFAULT_OUTCOME_ID));
+    return conditions;
   }
   return [];
 }
@@ -494,7 +520,12 @@ function isValidEdgeForNode(node: GraphNode, edge: GraphEdge): boolean {
     return options.some(option => option.option_id === optionId);
   }
   if (node.type === 'free_text') {
-    return !!edge.condition && parseVerdictEdgeCondition(edge.condition) !== null;
+    if (!edge.condition) return false;
+    const outcomeId = parseOutcomeEdgeCondition(edge.condition);
+    if (!outcomeId) return false;
+    if (outcomeId === FREE_TEXT_DEFAULT_OUTCOME_ID) return true;
+    const outcomes = (node.data.outcomes as FreeTextOutcome[]) ?? [];
+    return outcomes.some(outcome => outcome.outcome_id === outcomeId);
   }
   return false;
 }
@@ -626,39 +657,27 @@ export function graphToBackendFormat(graph: LessonGraph): Record<string, unknown
     }
 
     if (kind === 'free_text') {
-      const criteriaLegacy = (node.data.criteria as string) ?? '';
-      const feedbackLegacy = (node.data.feedback_text as string) ?? '';
+      const outcomes = (node.data.outcomes as FreeTextOutcome[]) ?? [];
+      const defaultOutcome = (node.data.default_outcome as Partial<FreeTextDefaultOutcome>) ?? {};
       return {
         id: node.id,
         kind,
         prompt: (node.data.question_text as string) ?? '',
         rubric: {
           referenceAnswer: (node.data.reference_answer ?? node.data.expected_answer ?? '') as string,
-          criteriaByVerdict: {
-            correct: (node.data.criteria_correct as string) ?? criteriaLegacy,
-            partial: (node.data.criteria_partial as string) ?? criteriaLegacy,
-            incorrect: (node.data.criteria_incorrect as string) ?? criteriaLegacy,
-          },
-          feedbackByVerdict: {
-            correct: (node.data.feedback_correct as string) ?? feedbackLegacy,
-            partial: (node.data.feedback_partial as string) ?? feedbackLegacy,
-            incorrect: (node.data.feedback_incorrect as string) ?? feedbackLegacy,
+          outcomes: outcomes.map(outcome => ({
+            id: outcome.outcome_id,
+            criteria: outcome.criteria ?? '',
+            verdict: outcome.verdict ?? 'incorrect',
+            feedback: outcome.feedback ?? '',
+            nextNodeId: getGraphEdgeTarget(edges, node.id, outcomeEdgeCondition(outcome.outcome_id)),
+          })),
+          defaultOutcome: {
+            verdict: defaultOutcome.verdict ?? 'incorrect',
+            feedback: defaultOutcome.feedback ?? '',
+            nextNodeId: getGraphEdgeTarget(edges, node.id, outcomeEdgeCondition(FREE_TEXT_DEFAULT_OUTCOME_ID)),
           },
         },
-        transitions: [
-          {
-            onVerdict: 'correct',
-            nextNodeId: getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('correct')),
-          },
-          {
-            onVerdict: 'partial',
-            nextNodeId: getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('partial')),
-          },
-          {
-            onVerdict: 'incorrect',
-            nextNodeId: getGraphEdgeTarget(edges, node.id, verdictEdgeCondition('incorrect')),
-          },
-        ],
       };
     }
 
@@ -731,21 +750,60 @@ export function graphFromBackendFormat(raw: Record<string, unknown>): LessonGrap
       data.question_text = (rn.prompt as string) ?? '';
       const rubric = (rn.rubric as Record<string, unknown>) ?? {};
       data.reference_answer = (rubric.referenceAnswer ?? rubric.reference_answer ?? '') as string;
-      const criteriaByVerdict = (rubric.criteriaByVerdict as Record<string, unknown>) ?? {};
-      const feedbackByVerdict = (rubric.feedbackByVerdict as Record<string, unknown>) ?? {};
-      const legacyCriteria = (rubric.criteria as string) ?? '';
-      data.criteria_correct = (criteriaByVerdict.correct as string) ?? legacyCriteria;
-      data.criteria_partial = (criteriaByVerdict.partial as string) ?? legacyCriteria;
-      data.criteria_incorrect = (criteriaByVerdict.incorrect as string) ?? legacyCriteria;
-      data.feedback_correct = (feedbackByVerdict.correct as string) ?? '';
-      data.feedback_partial = (feedbackByVerdict.partial as string) ?? '';
-      data.feedback_incorrect = (feedbackByVerdict.incorrect as string) ?? '';
-      const transitions = (rn.transitions as Array<Record<string, unknown>>) ?? [];
-      for (const transition of transitions) {
-        const verdict = parseVerdictEdgeCondition(verdictEdgeCondition((transition.onVerdict as GraphVerdict) ?? 'correct'));
-        const nextNodeId = (transition.nextNodeId as string) ?? '';
-        if (verdict && nextNodeId) {
-          edges.push({ from: id, to: nextNodeId, condition: verdictEdgeCondition(verdict) });
+      const rawOutcomes = rubric.outcomes as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(rawOutcomes)) {
+        // New outcome-based format.
+        data.outcomes = rawOutcomes.map(o => {
+          const outcomeId = (o.id as string) ?? '';
+          const nextNodeId = (o.nextNodeId as string) ?? '';
+          if (nextNodeId) {
+            edges.push({ from: id, to: nextNodeId, condition: outcomeEdgeCondition(outcomeId) });
+          }
+          return {
+            outcome_id: outcomeId,
+            criteria: (o.criteria as string) ?? '',
+            verdict: ((o.verdict as string) || 'incorrect') as GraphVerdict,
+            feedback: (o.feedback as string) ?? '',
+          };
+        });
+        const defaultOutcome = (rubric.defaultOutcome as Record<string, unknown>) ?? {};
+        data.default_outcome = {
+          verdict: ((defaultOutcome.verdict as string) || 'incorrect') as GraphVerdict,
+          feedback: (defaultOutcome.feedback as string) ?? '',
+        };
+        const defaultNext = (defaultOutcome.nextNodeId as string) ?? '';
+        if (defaultNext) {
+          edges.push({ from: id, to: defaultNext, condition: outcomeEdgeCondition(FREE_TEXT_DEFAULT_OUTCOME_ID) });
+        }
+      } else {
+        // Legacy verdict-based format -> convert to three outcomes (ids = verdict).
+        const criteriaByVerdict = (rubric.criteriaByVerdict as Record<string, unknown>) ?? {};
+        const feedbackByVerdict = (rubric.feedbackByVerdict as Record<string, unknown>) ?? {};
+        const legacyCriteria = (rubric.criteria as string) ?? '';
+        const transitions = (rn.transitions as Array<Record<string, unknown>>) ?? [];
+        const transitionByVerdict: Record<string, string> = {};
+        for (const transition of transitions) {
+          transitionByVerdict[(transition.onVerdict as string) ?? ''] = (transition.nextNodeId as string) ?? '';
+        }
+        data.outcomes = (['correct', 'partial', 'incorrect'] as GraphVerdict[]).map(verdict => {
+          const nextNodeId = transitionByVerdict[verdict] ?? '';
+          if (nextNodeId) {
+            edges.push({ from: id, to: nextNodeId, condition: outcomeEdgeCondition(verdict) });
+          }
+          return {
+            outcome_id: verdict,
+            criteria: (criteriaByVerdict[verdict] as string) ?? legacyCriteria,
+            verdict,
+            feedback: (feedbackByVerdict[verdict] as string) ?? '',
+          };
+        });
+        data.default_outcome = {
+          verdict: 'incorrect' as GraphVerdict,
+          feedback: (feedbackByVerdict.incorrect as string) ?? '',
+        };
+        const defaultNext = transitionByVerdict.incorrect ?? '';
+        if (defaultNext) {
+          edges.push({ from: id, to: defaultNext, condition: outcomeEdgeCondition(FREE_TEXT_DEFAULT_OUTCOME_ID) });
         }
       }
     } else if (kind === 'decision') {

@@ -830,13 +830,19 @@ func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string
 		return PreviewAnswerOutcome{}, ErrInvalidPreviewAction
 	case "free_text":
 		text, _ := answer["text"].(string)
+		evalOutcomes := make([]evaluation.EvaluationOutcome, 0, len(node.Outcomes))
+		for _, outcome := range node.Outcomes {
+			evalOutcomes = append(evalOutcomes, evaluation.EvaluationOutcome{
+				ID:       outcome.ID,
+				Verdict:  outcome.Verdict,
+				Criteria: outcome.Criteria,
+			})
+		}
 		result, err := s.evaluator.Evaluate(ctx, evaluation.FreeTextEvaluationInput{
-			Prompt:            node.Prompt,
-			ReferenceAnswer:   asString(node.Rubric["referenceAnswer"]),
-			CriteriaCorrect:   firstNonEmpty(asString(mapNestedValue(node.Rubric, "criteriaByVerdict", "correct")), asString(node.Rubric["criteria"])),
-			CriteriaPartial:   firstNonEmpty(asString(mapNestedValue(node.Rubric, "criteriaByVerdict", "partial")), asString(node.Rubric["criteria"])),
-			CriteriaIncorrect: firstNonEmpty(asString(mapNestedValue(node.Rubric, "criteriaByVerdict", "incorrect")), asString(node.Rubric["criteria"])),
-			StudentAnswer:     text,
+			Prompt:          node.Prompt,
+			ReferenceAnswer: asString(node.Rubric["referenceAnswer"]),
+			Outcomes:        evalOutcomes,
+			StudentAnswer:   text,
 		})
 		if err != nil {
 			if errors.Is(err, evaluation.ErrTemporarilyUnavailable) {
@@ -844,12 +850,19 @@ func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string
 			}
 			return PreviewAnswerOutcome{}, err
 		}
-		nextNodeID := node.Transitions[result.Verdict]
-		if nextNodeID == "" {
+		chosen := findGraphOutcome(node.Outcomes, result.OutcomeID)
+		if chosen == nil {
+			chosen = node.DefaultOutcome
+		}
+		if chosen == nil || strings.TrimSpace(chosen.NextNodeID) == "" {
 			return PreviewAnswerOutcome{}, ErrInvalidPreviewAction
 		}
+		feedback := strings.TrimSpace(chosen.Feedback)
+		if feedback == "" {
+			feedback = result.Feedback
+		}
 		session.StateVersion++
-		session.CurrentID = nextNodeID
+		session.CurrentID = chosen.NextNodeID
 		appendPreviewHistory(session, session.Graph.NodeMap[session.CurrentID], "")
 		session.LastTouched = time.Now()
 		nextNode := session.Graph.NodeMap[session.CurrentID]
@@ -857,8 +870,8 @@ func (s *Service) PreviewAnswer(ctx context.Context, role string, actorID string
 		step.Navigation = previewNavigation(session)
 		return PreviewAnswerOutcome{
 			Preview:      true,
-			Verdict:      result.Verdict,
-			FeedbackText: previewFreeTextFeedback(node.Rubric, result.Verdict, result.Feedback),
+			Verdict:      chosen.Verdict,
+			FeedbackText: feedback,
 			NextStep:     ptrStep(step),
 		}, nil
 	default:
@@ -924,14 +937,6 @@ func (s *Service) PreviewBack(_ context.Context, role string, actorID string, pr
 	session.CurrentID = session.History[targetIndex].NodeID
 	session.LastTouched = time.Now()
 	return buildPreviewEnvelope(session), nil
-}
-
-func previewFreeTextFeedback(rubric map[string]any, verdict string, fallback string) string {
-	feedbackByVerdict, _ := rubric["feedbackByVerdict"].(map[string]any)
-	if feedback := strings.TrimSpace(asString(feedbackByVerdict[verdict])); feedback != "" {
-		return feedback
-	}
-	return fallback
 }
 
 func mapNestedValue(root map[string]any, key string, nested string) any {

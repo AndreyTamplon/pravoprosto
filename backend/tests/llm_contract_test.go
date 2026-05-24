@@ -229,7 +229,7 @@ func TestPreview_FreeTextLLMFailureDoesNotAdvanceState(t *testing.T) {
 		t.Fatalf("decode preview start: %v", err)
 	}
 
-	nextResp := performJSON(t, teacherClient, http.MethodPost, testApp.Server.URL+"/api/v1/preview-sessions/"+preview.PreviewSessionID+"/next", map[string]any{"state_version": preview.Step.StateVersion}, teacherCSRF)
+	nextResp := performJSON(t, teacherClient, http.MethodPost, testApp.Server.URL+"/api/v1/preview-sessions/"+preview.PreviewSessionID+"/next", map[string]any{"state_version": preview.Step.StateVersion, "expected_node_id": preview.Step.NodeID}, teacherCSRF)
 	if nextResp.StatusCode != http.StatusOK {
 		t.Fatalf("preview next llm status: %d", nextResp.StatusCode)
 	}
