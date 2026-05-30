@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'rea
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import type { Role } from './api/types';
 import { Suspense, lazy, type ReactNode } from 'react';
+import { useMetrikaPageViews } from './utils/metrika';
 
 /* ===== Lazy-loaded pages ===== */
 
@@ -134,10 +135,17 @@ function RootRedirect() {
   return <Navigate to={roleHome(session.user!.role)} replace />;
 }
 
+/* ===== Yandex.Metrika SPA page-view tracker ===== */
+function MetrikaTracker() {
+  useMetrikaPageViews();
+  return null;
+}
+
 /* ===== App ===== */
 export default function App() {
   return (
     <BrowserRouter>
+      <MetrikaTracker />
       <AuthProvider>
         <Suspense fallback={<PageLoader />}>
           <Routes>
