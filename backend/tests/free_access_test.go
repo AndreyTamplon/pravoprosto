@@ -357,3 +357,69 @@ func TestFreeAccess_ConfigGuardsAndStudentScope(t *testing.T) {
 		t.Fatalf("granted student l4 expected granted, got %s", got)
 	}
 }
+
+// TestFreeAccess_StudentCheckoutRequiresEmailForReceipt covers the prod bug: with T-Bank
+// fiscalization on (receipt required) and a student that has no email, self-checkout must ask for
+// an email (422 email_required) instead of letting T-Bank reject the Init; once supplied, the
+// receipt is built and the email is persisted to the account.
+func TestFreeAccess_StudentCheckoutRequiresEmailForReceipt(t *testing.T) {
+	const terminalKey, password, paymentID = "rcpt-terminal", "rcpt-password", "900003"
+	fakeTBank := fakeTBankServer(t, terminalKey, password, paymentID)
+	defer fakeTBank.Close()
+	t.Setenv("PRAVO_TBANK_RECEIPT_ENABLED", "true")
+	t.Setenv("PRAVO_TBANK_RECEIPT_TAXATION", "osn")
+
+	testApp := app.New(t)
+	adminClient := httpclient.New(t)
+	adminCSRF := loginExistingAdmin(t, adminClient, testApp)
+	studentClient := httpclient.New(t)
+	studentCSRF, studentID := loginAsRole(t, studentClient, testApp, "rcpt-student", "student")
+
+	// Simulate a student that logged in without granting the email scope.
+	if _, err := testApp.DB.Pool().Exec(context.Background(), `update external_identities set email='' where account_id=$1`, studentID); err != nil {
+		t.Fatalf("clear student email: %v", err)
+	}
+
+	courseID, _ := publishPlatformCourse(t, adminClient, testApp, adminCSRF, "Receipt Course", twoModuleCourse())
+	setFreeLessonCount(t, adminClient, testApp, adminCSRF, courseID, 2)
+	offerID := createPlatformOffer(t, adminClient, testApp, adminCSRF, 9900)
+	if resp := setOfferStatus(t, adminClient, testApp, adminCSRF, offerID, "active", 9900); resp.StatusCode != http.StatusOK {
+		t.Fatalf("activate platform offer: %d", resp.StatusCode)
+	}
+
+	// No email → blocked with email_required (T-Bank not called).
+	noEmail := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/offers/"+offerID+"/checkout", map[string]any{}, studentCSRF)
+	defer noEmail.Body.Close()
+	if noEmail.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("checkout without email expected 422, got %d", noEmail.StatusCode)
+	}
+
+	// Invalid email → 400.
+	badEmail := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/offers/"+offerID+"/checkout", map[string]any{"email": "nope"}, studentCSRF)
+	defer badEmail.Body.Close()
+	if badEmail.StatusCode != http.StatusBadRequest {
+		t.Fatalf("checkout with invalid email expected 400, got %d", badEmail.StatusCode)
+	}
+
+	// Valid email → checkout proceeds, receipt carries the email, and the email is persisted.
+	withEmail := performJSON(t, studentClient, http.MethodPost, testApp.Server.URL+"/api/v1/student/offers/"+offerID+"/checkout", map[string]any{"email": "kid@example.com"}, studentCSRF)
+	defer withEmail.Body.Close()
+	if withEmail.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(withEmail.Body)
+		t.Fatalf("checkout with email expected 201, got %d (%s)", withEmail.StatusCode, string(body))
+	}
+	var initReq string
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `select init_request_json::text from tbank_payment_sessions tps join commercial_orders o on o.id=tps.order_id where o.student_id=$1 order by tps.created_at desc limit 1`, studentID).Scan(&initReq); err != nil {
+		t.Fatalf("query init request: %v", err)
+	}
+	if !strings.Contains(initReq, "kid@example.com") {
+		t.Fatalf("init request should contain receipt email, got: %s", initReq)
+	}
+	var stored string
+	if err := testApp.DB.Pool().QueryRow(context.Background(), `select coalesce(email,'') from external_identities where account_id=$1`, studentID).Scan(&stored); err != nil {
+		t.Fatalf("query stored email: %v", err)
+	}
+	if stored != "kid@example.com" {
+		t.Fatalf("expected persisted email kid@example.com, got %q", stored)
+	}
+}

@@ -676,6 +676,21 @@ func (s *Service) upsertIdentity(ctx context.Context, provider string, identity 
 		}
 	}
 
+	// Refresh the stored email/profile on every login when the provider returns a non-empty
+	// email. Yandex may grant the email scope on a later login than the first, and the insert
+	// path uses ON CONFLICT DO NOTHING, so without this an account created without an email
+	// would never get one — which breaks fiscal receipts (T-Bank requires the buyer's email).
+	// Never overwrite a known email with an empty one.
+	if strings.TrimSpace(identity.Email) != "" {
+		if _, err := tx.Exec(ctx, `
+			update external_identities
+			set email = $3, email_verified = $4, raw_profile_json = $5
+			where provider = $1 and provider_subject = $2
+		`, provider, identity.Subject, identity.Email, identity.EmailVerified, identity.RawProfile); err != nil {
+			return "", "", err
+		}
+	}
+
 	if status == "blocked" {
 		return "", "", ErrAccountBlocked
 	}

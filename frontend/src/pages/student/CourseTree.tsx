@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getCourseTree, createPurchaseRequest, startStudentCheckout, retryLesson } from '../../api/client';
-import { Button, Badge, Spinner, EmptyState } from '../../components/ui';
+import { getCourseTree, createPurchaseRequest, startStudentCheckout, retryLesson, ApiRequestError } from '../../api/client';
+import { Button, Badge, Spinner, EmptyState, Input } from '../../components/ui';
 import { formatPrice } from '../../utils/format';
 import type { LessonNode, LessonAccessState } from '../../api/types';
 import styles from './CourseTree.module.css';
@@ -42,6 +42,8 @@ function LessonNodeItem({
   const [retryError, setRetryError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [emailPrompt, setEmailPrompt] = useState(false);
+  const [emailValue, setEmailValue] = useState('');
 
   const accessState = node.access.access_state;
   const offer = node.access.offer;
@@ -87,12 +89,14 @@ function LessonNodeItem({
   };
 
   // Self-checkout: redirect the student to the T-Bank hosted payment page for the platform product.
-  const handleCheckout = async () => {
+  // The fiscal receipt needs the buyer's email; if the account has none, the backend returns
+  // `email_required` and we ask for one inline, then retry.
+  const handleCheckout = async (email?: string) => {
     if (!offer || checkingOut) return;
     setCheckingOut(true);
     setCheckoutError(null);
     try {
-      const res = await startStudentCheckout(offer.offer_id);
+      const res = await startStudentCheckout(offer.offer_id, email);
       if (!res.payment_url) {
         setCheckoutError('Не удалось получить ссылку на оплату');
         setCheckingOut(false);
@@ -100,6 +104,11 @@ function LessonNodeItem({
       }
       window.location.href = res.payment_url;
     } catch (err: unknown) {
+      if (err instanceof ApiRequestError && err.code === 'email_required') {
+        setEmailPrompt(true);
+        setCheckingOut(false);
+        return;
+      }
       setCheckoutError(err instanceof Error ? err.message : 'Не удалось перейти к оплате');
       setCheckingOut(false);
     }
@@ -154,29 +163,56 @@ function LessonNodeItem({
           <Badge variant="orange" className={styles.priceBadge}>
             {formatPrice(offer.price_amount_minor, offer.price_currency)}
           </Badge>
-          <div style={{ marginTop: 8 }}>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleCheckout}
-              disabled={checkingOut}
-            >
-              {checkingOut ? 'Переход к оплате…' : 'Открыть полный доступ'}
-            </Button>
-          </div>
-          <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 6 }}>
-            или попроси родителя оплатить
-          </div>
-          <div style={{ marginTop: 6 }}>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePurchase}
-              disabled={requesting || offer.has_open_request}
-            >
-              {offer.has_open_request ? 'Заявка отправлена' : 'Оставить заявку'}
-            </Button>
-          </div>
+          {!emailPrompt ? (
+            <>
+              <div style={{ marginTop: 8 }}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleCheckout()}
+                  disabled={checkingOut}
+                >
+                  {checkingOut ? 'Переход к оплате…' : 'Открыть полный доступ'}
+                </Button>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 6 }}>
+                или попроси родителя оплатить
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePurchase}
+                  disabled={requesting || offer.has_open_request}
+                >
+                  {offer.has_open_request ? 'Заявка отправлена' : 'Оставить заявку'}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: '0.85rem', color: '#374151', marginBottom: 6 }}>
+                Укажи e-mail — туда придёт чек об оплате:
+              </div>
+              <Input
+                type="email"
+                placeholder="you@example.com"
+                value={emailValue}
+                onChange={e => setEmailValue(e.target.value)}
+                aria-label="E-mail для чека"
+              />
+              <div style={{ marginTop: 6 }}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleCheckout(emailValue.trim())}
+                  disabled={checkingOut || !emailValue.trim()}
+                >
+                  {checkingOut ? 'Переход к оплате…' : 'Оплатить'}
+                </Button>
+              </div>
+            </div>
+          )}
           {(checkoutError || purchaseError) && (
             <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 4 }}>{checkoutError ?? purchaseError}</div>
           )}

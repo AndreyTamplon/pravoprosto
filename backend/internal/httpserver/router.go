@@ -495,7 +495,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			}, deps)))
 			sr.Post("/offers/{offerID}/checkout", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 				session, _ := sessionFromContext(r.Context())
-				view, err := deps.Commerce.StartStudentCheckout(r.Context(), session.AccountID, chi.URLParam(r, "offerID"))
+				// Optional email for the fiscal receipt when the student has none stored. Body may be empty.
+				var body struct {
+					Email string `json:"email"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				view, err := deps.Commerce.StartStudentCheckout(r.Context(), session.AccountID, chi.URLParam(r, "offerID"), body.Email)
 				if err != nil {
 					switch err {
 					case commerce.ErrOfferNotFound:
@@ -508,6 +513,10 @@ func NewRouter(deps Dependencies) http.Handler {
 						writeError(w, http.StatusConflict, "entitlement_already_active", "Entitlement already active", nil)
 					case commerce.ErrOrderAlreadyPendingForTarget:
 						writeError(w, http.StatusConflict, "order_already_pending", "Order already pending", nil)
+					case commerce.ErrEmailRequiredForReceipt:
+						writeError(w, http.StatusUnprocessableEntity, "email_required", "Email is required for the receipt", nil)
+					case commerce.ErrInvalidEmail:
+						writeError(w, http.StatusBadRequest, "invalid_email", "Invalid email", nil)
 					case commerce.ErrBillingNotConfigured:
 						writeError(w, http.StatusServiceUnavailable, "billing_not_configured", "Billing provider is not configured", nil)
 					case commerce.ErrBillingProviderRejected:

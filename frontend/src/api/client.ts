@@ -93,6 +93,12 @@ function translateApiMessage(status: number, code: string, message: string): str
   if (code === 'order_already_pending') {
     return 'Уже есть незавершённый заказ — проверьте оплату.';
   }
+  if (code === 'email_required') {
+    return 'Укажите e-mail для чека.';
+  }
+  if (code === 'invalid_email') {
+    return 'Похоже, e-mail указан некорректно.';
+  }
   if (code === 'out_of_hearts') {
     return 'Жизни закончились. Подождите восстановления.';
   }
@@ -357,8 +363,8 @@ export const abandonLessonSession = async (sessionId: string): Promise<void> => 
 export const claimGuardianLink = (token: string) => post<void>('/student/guardian-links/claim', { token });
 export const claimCourseLink = (token: string) => post<void>('/student/course-links/claim', { token });
 export const createPurchaseRequest = (offerId: string) => post<void>(`/student/offers/${offerId}/purchase-requests`);
-export const startStudentCheckout = (offerId: string) =>
-  post<import('./types').ParentCheckoutResponse>(`/student/offers/${offerId}/checkout`);
+export const startStudentCheckout = (offerId: string, email?: string) =>
+  post<import('./types').ParentCheckoutResponse>(`/student/offers/${offerId}/checkout`, email ? { email } : {});
 export const getStudentProfile = () => get<import('./types').StudentProfile>('/student/profile');
 export const updateStudentProfile = (data: { display_name: string }) => put<import('./types').StudentProfile>('/student/profile', data);
 

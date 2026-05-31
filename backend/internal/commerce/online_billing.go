@@ -164,22 +164,28 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 	if err := s.ensureParentChildLink(ctx, parentID, studentID); err != nil {
 		return nil, err
 	}
-	return s.startCheckout(ctx, parentID, studentID, offerID, false)
+	return s.startCheckout(ctx, parentID, studentID, offerID, false, "")
 }
 
 // StartStudentCheckout lets a student pay for their own access. Restricted to the platform-wide
 // "Полный доступ" product — students cannot self-checkout legacy per-course/per-lesson offers.
-func (s *Service) StartStudentCheckout(ctx context.Context, studentID string, offerID string) (map[string]any, error) {
+// emailOverride is used for the fiscal receipt when the student has no stored email yet.
+func (s *Service) StartStudentCheckout(ctx context.Context, studentID string, offerID string, emailOverride string) (map[string]any, error) {
 	if !s.tbankEnabled() {
 		return nil, ErrBillingNotConfigured
 	}
-	return s.startCheckout(ctx, studentID, studentID, offerID, true)
+	emailOverride = strings.TrimSpace(emailOverride)
+	if emailOverride != "" && !validEmail(emailOverride) {
+		return nil, ErrInvalidEmail
+	}
+	return s.startCheckout(ctx, studentID, studentID, offerID, true, emailOverride)
 }
 
 // startCheckout creates (or reuses) an awaiting order for the offer, opens a T-Bank payment
 // session, and returns the hosted payment URL. payerID is who pays (parent or student); both are
 // stored as the order/session creator. studentSelf restricts the offer to the platform product.
-func (s *Service) startCheckout(ctx context.Context, payerID string, studentID string, offerID string, studentSelf bool) (map[string]any, error) {
+// emailOverride supplies a receipt email when the payer has none stored.
+func (s *Service) startCheckout(ctx context.Context, payerID string, studentID string, offerID string, studentSelf bool, emailOverride string) (map[string]any, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -279,6 +285,24 @@ func (s *Service) startCheckout(ctx context.Context, payerID string, studentID s
 		limit 1
 	`, payerID).Scan(&payerEmail); err != nil && err != pgx.ErrNoRows {
 		return nil, err
+	}
+	// Fall back to the email supplied at checkout when the payer has none stored, and persist it
+	// so it's reused for future receipts (and as the account's contact). T-Bank requires the
+	// buyer's email on the fiscal receipt.
+	if strings.TrimSpace(payerEmail) == "" && strings.TrimSpace(emailOverride) != "" {
+		payerEmail = strings.TrimSpace(emailOverride)
+		if _, err := tx.Exec(ctx, `
+			update external_identities
+			set email = $2, email_verified = false
+			where account_id = $1 and (email is null or trim(email) = '')
+		`, payerID, payerEmail); err != nil {
+			return nil, err
+		}
+	}
+	// Fiscalization is on (receipt required) but we have no buyer email — ask the client for one
+	// instead of letting T-Bank reject the Init with "expected.receipt".
+	if s.tbankReceiptEnabled && strings.TrimSpace(payerEmail) == "" {
+		return nil, ErrEmailRequiredForReceipt
 	}
 
 	if existingOrder {

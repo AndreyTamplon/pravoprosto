@@ -1080,7 +1080,26 @@ var (
 	ErrOfferNotCheckoutableByStudent  = fmt.Errorf("offer_not_checkoutable_by_student")
 	ErrCourseNotFound                 = fmt.Errorf("course_not_found")
 	ErrInvalidFreeLessonCount         = fmt.Errorf("invalid_free_lesson_count")
+	ErrEmailRequiredForReceipt        = fmt.Errorf("email_required_for_receipt")
+	ErrInvalidEmail                   = fmt.Errorf("invalid_email")
 )
+
+// validEmail does a light syntactic check — enough to keep obviously-bad values out of the fiscal
+// receipt; T-Bank does the authoritative validation.
+func validEmail(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 3 || len(s) > 254 {
+		return false
+	}
+	at := strings.IndexByte(s, '@')
+	if at <= 0 || at == len(s)-1 {
+		return false
+	}
+	if strings.ContainsAny(s, " \t\r\n") {
+		return false
+	}
+	return strings.IndexByte(s[at+1:], '.') > 0
+}
 
 // purchaseTarget is the shape passed to fulfillPurchaseEntitlementTx. TargetCourseID is a
 // pointer because a platform ("Полный доступ") order/entitlement has no course (NULL).
