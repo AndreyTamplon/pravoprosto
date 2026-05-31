@@ -63,6 +63,7 @@ export interface CatalogCourse {
   owner_kind: string;
   source_section: string;
   progress_percent: number;
+  free_lesson_count?: number;
   is_new: boolean;
   badges: string[];
 }
@@ -130,6 +131,7 @@ export interface LessonProgressInfo {
 
 export interface LessonOffer {
   offer_id: string;
+  target_type?: 'course' | 'lesson' | 'platform';
   price_amount_minor: number;
   price_currency: string;
   has_open_request: boolean;
@@ -252,8 +254,8 @@ export interface ParentPaidOffer {
   offer_id: string;
   title: string;
   description: string;
-  target_type: 'course' | 'lesson';
-  target_course_id: string;
+  target_type: 'course' | 'lesson' | 'platform';
+  target_course_id?: string;
   target_lesson_id?: string;
   course_title?: string;
   lesson_title?: string;
@@ -888,6 +890,7 @@ export interface AdminCourse {
   has_published_revision: boolean;
   lesson_count: number;
   student_count: number;
+  free_lesson_count?: number;
   created_at: string;
 }
 
@@ -914,8 +917,8 @@ export interface PendingReview {
 /* ===== Commerce ===== */
 export interface CommercialOffer {
   offer_id: string;
-  target_type: 'course' | 'lesson';
-  target_course_id: string;
+  target_type: 'course' | 'lesson' | 'platform';
+  target_course_id?: string;
   target_lesson_id?: string;
   course_title?: string;
   lesson_title?: string;
@@ -955,8 +958,8 @@ export interface Entitlement {
   entitlement_id: string;
   student_id: string;
   student_name: string;
-  target_type: 'course' | 'lesson';
-  target_course_id: string;
+  target_type: 'course' | 'lesson' | 'platform';
+  target_course_id?: string;
   target_lesson_id?: string;
   course_title: string;
   source_type: 'purchase' | 'complimentary';

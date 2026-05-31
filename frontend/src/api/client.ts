@@ -66,6 +66,33 @@ function translateApiMessage(status: number, code: string, message: string): str
   if (code === 'forbidden') {
     return 'Недостаточно прав для этого действия.';
   }
+  if (code === 'content_locked_paid') {
+    return 'Этот этап входит в полный доступ. Оформите оплату, чтобы открыть его.';
+  }
+  if (code === 'offer_not_checkoutable') {
+    return 'Этот тариф нельзя оплатить здесь.';
+  }
+  if (code === 'active_offer_conflict') {
+    return 'Уже есть активный тариф для этой цели.';
+  }
+  if (code === 'entitlement_already_active') {
+    return 'Доступ уже открыт.';
+  }
+  if (code === 'billing_not_configured') {
+    return 'Онлайн-оплата временно недоступна.';
+  }
+  if (code === 'billing_provider_rejected') {
+    return 'Оплата временно недоступна. Попробуйте позже.';
+  }
+  if (code === 'offer_not_found') {
+    return 'Тариф не найден.';
+  }
+  if (code === 'offer_not_active') {
+    return 'Этот тариф больше недоступен.';
+  }
+  if (code === 'order_already_pending') {
+    return 'Уже есть незавершённый заказ — проверьте оплату.';
+  }
   if (code === 'out_of_hearts') {
     return 'Жизни закончились. Подождите восстановления.';
   }
@@ -330,6 +357,8 @@ export const abandonLessonSession = async (sessionId: string): Promise<void> => 
 export const claimGuardianLink = (token: string) => post<void>('/student/guardian-links/claim', { token });
 export const claimCourseLink = (token: string) => post<void>('/student/course-links/claim', { token });
 export const createPurchaseRequest = (offerId: string) => post<void>(`/student/offers/${offerId}/purchase-requests`);
+export const startStudentCheckout = (offerId: string) =>
+  post<import('./types').ParentCheckoutResponse>(`/student/offers/${offerId}/checkout`);
 export const getStudentProfile = () => get<import('./types').StudentProfile>('/student/profile');
 export const updateStudentProfile = (data: { display_name: string }) => put<import('./types').StudentProfile>('/student/profile', data);
 
@@ -571,7 +600,7 @@ export const getOffers = async (): Promise<import('./types').CommercialOffer[]> 
   const items = await getList<Record<string, unknown>>('/admin/commerce/offers');
   return items.map(o => ({
     offer_id: (o.offer_id ?? '') as string,
-    target_type: (o.target_type ?? 'course') as 'course' | 'lesson',
+    target_type: (o.target_type ?? 'course') as 'course' | 'lesson' | 'platform',
     target_course_id: (o.target_course_id ?? '') as string,
     target_lesson_id: (o.target_lesson_id ?? undefined) as string | undefined,
     course_title: (o.course_title ?? undefined) as string | undefined,
@@ -586,6 +615,8 @@ export const getOffers = async (): Promise<import('./types').CommercialOffer[]> 
 };
 export const createOffer = (data: Record<string, unknown>) => post<{ offer_id: string }>('/admin/commerce/offers', data);
 export const updateOffer = (offerId: string, data: Record<string, unknown>) => put<void>(`/admin/commerce/offers/${offerId}`, data);
+export const setCourseFreeAccess = (courseId: string, freeLessonCount: number) =>
+  put<{ course_id: string; free_lesson_count: number }>(`/admin/commerce/courses/${courseId}/free-access`, { free_lesson_count: freeLessonCount });
 export const getPurchaseRequests = async (): Promise<import('./types').PurchaseRequest[]> => {
   const items = await getList<Record<string, unknown>>('/admin/commerce/purchase-requests');
   return items.map(r => {
@@ -645,7 +676,7 @@ export const getEntitlements = async (params?: {
       entitlement_id: (e.entitlement_id ?? '') as string,
       student_id: (student.account_id ?? '') as string,
       student_name: (student.display_name ?? '') as string,
-      target_type: (e.target_type ?? 'course') as 'course' | 'lesson',
+      target_type: (e.target_type ?? 'course') as 'course' | 'lesson' | 'platform',
       target_course_id: (e.target_course_id ?? '') as string,
       target_lesson_id: (e.target_lesson_id as string) ?? undefined,
       course_title: (e.course_title ?? '') as string,

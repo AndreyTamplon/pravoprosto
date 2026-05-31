@@ -262,6 +262,7 @@ func (s *Service) ListCourses(ctx context.Context, role string, accountID string
 			           from course_access_grants ag
 			           where ag.course_id = c.id and ag.archived_at is null
 			       ) as student_count,
+			       c.free_lesson_count,
 			       c.created_at::text
 			from courses c
 			join course_drafts d on d.course_id = c.id
@@ -296,8 +297,8 @@ func (s *Service) ListCourses(ctx context.Context, role string, accountID string
 		} else {
 			var courseID, title, ownerKind, courseKind, status, createdAt string
 			var currentRevisionID *string
-			var lessonCount, studentCount int
-			if err := rows.Scan(&courseID, &title, &ownerKind, &courseKind, &status, &currentRevisionID, &lessonCount, &studentCount, &createdAt); err != nil {
+			var lessonCount, studentCount, freeLessonCount int
+			if err := rows.Scan(&courseID, &title, &ownerKind, &courseKind, &status, &currentRevisionID, &lessonCount, &studentCount, &freeLessonCount, &createdAt); err != nil {
 				return CourseListView{}, err
 			}
 			items = append(items, map[string]any{
@@ -309,6 +310,7 @@ func (s *Service) ListCourses(ctx context.Context, role string, accountID string
 				"current_revision_id": currentRevisionID,
 				"lesson_count":        lessonCount,
 				"student_count":       studentCount,
+				"free_lesson_count":   freeLessonCount,
 				"created_at":          createdAt,
 			})
 		}

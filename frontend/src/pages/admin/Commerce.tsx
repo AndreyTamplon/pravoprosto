@@ -5,7 +5,7 @@ import {
   getPurchaseRequests, declinePurchaseRequest,
   getOrders, createManualOrder, confirmPayment,
   grantEntitlement, revokeEntitlement, getEntitlements,
-  getAdminCourses, getAdminDraft,
+  getAdminCourses, getAdminDraft, setCourseFreeAccess,
 } from '../../api/client';
 import { Button, Badge, Spinner, Modal, Input, Textarea, Select, EmptyState, StudentPicker } from '../../components/ui';
 import { formatPrice, formatDate, formatDateTime } from '../../utils/format';
@@ -13,14 +13,26 @@ import { generateIdempotencyKey } from '../../utils/format';
 import type { CommercialOffer, PurchaseRequest, CommercialOrder, AdminCourse, Entitlement, CourseDraft } from '../../api/types';
 import styles from './Commerce.module.css';
 
-type Tab = 'offers' | 'requests' | 'orders' | 'entitlements';
+type Tab = 'offers' | 'requests' | 'orders' | 'free' | 'entitlements';
 
 const TAB_LABELS: Record<Tab, string> = {
   offers: 'Тарифы',
   requests: 'Заявки',
   orders: 'Заказы',
+  free: 'Бесплатный доступ',
   entitlements: 'Доступы',
 };
+
+function targetTypeLabel(t: string): string {
+  if (t === 'platform') return 'Полный доступ';
+  if (t === 'course') return 'Курс';
+  return 'Урок';
+}
+function targetTypeColor(t: string): 'lime' | 'blue' | 'orange' {
+  if (t === 'platform') return 'lime';
+  if (t === 'course') return 'blue';
+  return 'orange';
+}
 
 /* ========= Lesson Select (shared helper) ========= */
 function LessonSelect({ courseId, value, onChange }: { courseId: string; value: string; onChange: (v: string) => void }) {
@@ -52,7 +64,7 @@ function OffersTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState<CommercialOffer | null>(null);
 
-  const [cTargetType, setCTargetType] = useState<'course' | 'lesson'>('course');
+  const [cTargetType, setCTargetType] = useState<'course' | 'lesson' | 'platform'>('course');
   const [cCourseId, setCCourseId] = useState('');
   const [cLessonId, setCLessonId] = useState('');
   const [cTitle, setCTitle] = useState('');
@@ -82,10 +94,12 @@ function OffersTab() {
     setFormLoading(true); setFormError('');
     try {
       const body: Record<string, unknown> = {
-        target_type: cTargetType, target_course_id: cCourseId,
+        target_type: cTargetType,
         title: cTitle.trim(), description: cDesc.trim(),
         price_amount_minor: Math.round(Number(cPrice) * 100), price_currency: 'RUB',
       };
+      // A platform ("Полный доступ") offer has no course/lesson target.
+      if (cTargetType !== 'platform') body.target_course_id = cCourseId;
       if (cTargetType === 'lesson' && cLessonId) body.target_lesson_id = cLessonId;
       await createOffer(body);
       setShowCreate(false); resetCreate(); reload();
@@ -164,7 +178,7 @@ function OffersTab() {
             {data.map(o => (
               <tr key={o.offer_id}>
                 <td className={styles.cellBold}>{o.title}</td>
-                <td><Badge color={o.target_type === 'course' ? 'blue' : 'orange'}>{o.target_type === 'course' ? 'Курс' : 'Урок'}</Badge></td>
+                <td><Badge color={o.target_type === 'platform' ? 'lime' : o.target_type === 'course' ? 'blue' : 'orange'}>{o.target_type === 'platform' ? 'Полный доступ' : o.target_type === 'course' ? 'Курс' : 'Урок'}</Badge></td>
                 <td>{o.course_title}{o.lesson_title ? ` / ${o.lesson_title}` : ''}</td>
                 <td className={styles.cellBold}>{formatPrice(o.price_amount_minor, o.price_currency)}</td>
                 <td>{statusBadge(o.status)}</td>
@@ -185,18 +199,26 @@ function OffersTab() {
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Новый тариф">
         <div className={styles.modalForm}>
-          <Select label="Тип цели" value={cTargetType} onChange={e => setCTargetType(e.target.value as 'course' | 'lesson')}>
+          <Select label="Тип цели" value={cTargetType} onChange={e => setCTargetType(e.target.value as 'course' | 'lesson' | 'platform')}>
             <option value="course">Курс</option>
             <option value="lesson">Урок</option>
+            <option value="platform">Полный доступ (вся платформа)</option>
           </Select>
-          <Select label="Курс" value={cCourseId} onChange={e => { setCCourseId(e.target.value); setCLessonId(''); }}>
-            <option value="">— Выберите курс —</option>
-            {(courses.data ?? []).map(c => (
-              <option key={c.course_id} value={c.course_id}>{c.title}</option>
-            ))}
-          </Select>
+          {cTargetType !== 'platform' && (
+            <Select label="Курс" value={cCourseId} onChange={e => { setCCourseId(e.target.value); setCLessonId(''); }}>
+              <option value="">— Выберите курс —</option>
+              {(courses.data ?? []).map(c => (
+                <option key={c.course_id} value={c.course_id}>{c.title}</option>
+              ))}
+            </Select>
+          )}
           {cTargetType === 'lesson' && (
             <LessonSelect courseId={cCourseId} value={cLessonId} onChange={setCLessonId} />
+          )}
+          {cTargetType === 'platform' && (
+            <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+              Один платёж открывает все уроки всех курсов. Может быть только один активный тариф «Полный доступ».
+            </div>
           )}
           <Input label="Название тарифа" value={cTitle} onChange={e => setCTitle(e.target.value)} />
           <Textarea label="Описание" value={cDesc} onChange={e => setCDesc(e.target.value)} rows={2} />
@@ -204,7 +226,7 @@ function OffersTab() {
           {formError && <div className={styles.error}>{formError}</div>}
           <div className={styles.modalActions}>
             <Button variant="secondary" onClick={() => setShowCreate(false)}>Отмена</Button>
-            <Button onClick={handleCreate} loading={formLoading} disabled={!cTitle.trim() || !cCourseId || !cPrice}>
+            <Button onClick={handleCreate} loading={formLoading} disabled={!cTitle.trim() || !cPrice || (cTargetType !== 'platform' && !cCourseId)}>
               Создать
             </Button>
           </div>
@@ -279,7 +301,7 @@ function RequestsTab() {
               <tr key={r.request_id}>
                 <td className={styles.cellBold}>{r.student_name}</td>
                 <td>{r.offer_title}</td>
-                <td><Badge color={r.target_type === 'course' ? 'blue' : 'orange'}>{r.target_type === 'course' ? 'Курс' : 'Урок'}</Badge></td>
+                <td><Badge color={targetTypeColor(r.target_type)}>{targetTypeLabel(r.target_type)}</Badge></td>
                 <td>{formatDateTime(r.created_at)}</td>
                 <td>{statusBadge(r.status)}</td>
                 <td>
@@ -418,7 +440,7 @@ function OrdersTab() {
               <span className={styles.detailLabel}>Тариф</span>
               <span className={styles.detailValue}>{selectedOrder.offer_title}</span>
               <span className={styles.detailLabel}>Тип</span>
-              <span className={styles.detailValue}>{selectedOrder.target_type === 'course' ? 'Курс' : 'Урок'}</span>
+              <span className={styles.detailValue}>{targetTypeLabel(selectedOrder.target_type)}</span>
               <span className={styles.detailLabel}>Сумма</span>
               <span className={styles.detailValue}>{formatPrice(selectedOrder.price_amount_minor, selectedOrder.price_currency)}</span>
               <span className={styles.detailLabel}>Статус</span>
@@ -490,7 +512,7 @@ function EntitlementsTab() {
   const [showGrant, setShowGrant] = useState(false);
   const [grantStudentId, setGrantStudentId] = useState('');
   const [grantStudentName, setGrantStudentName] = useState('');
-  const [grantTargetType, setGrantTargetType] = useState<'course' | 'lesson'>('course');
+  const [grantTargetType, setGrantTargetType] = useState<'course' | 'lesson' | 'platform'>('course');
   const [grantCourseId, setGrantCourseId] = useState('');
   const [grantLessonId, setGrantLessonId] = useState('');
   const [grantLoading, setGrantLoading] = useState(false);
@@ -510,14 +532,14 @@ function EntitlementsTab() {
   }
 
   async function handleGrant() {
-    if (!grantStudentId.trim() || !grantCourseId) return;
+    if (!grantStudentId.trim() || (grantTargetType !== 'platform' && !grantCourseId)) return;
     setGrantLoading(true); setActionError(''); setSuccessMsg('');
     try {
       const body: Record<string, unknown> = {
         student_id: grantStudentId.trim(),
         target_type: grantTargetType,
-        target_course_id: grantCourseId,
       };
+      if (grantTargetType !== 'platform') body.target_course_id = grantCourseId;
       if (grantTargetType === 'lesson' && grantLessonId) body.target_lesson_id = grantLessonId;
       await grantEntitlement(body);
       showSuccess('Доступ успешно выдан!');
@@ -610,7 +632,7 @@ function EntitlementsTab() {
             {data.map(e => (
               <tr key={e.entitlement_id}>
                 <td className={styles.cellBold}>{e.student_name}</td>
-                <td><Badge color={e.target_type === 'course' ? 'blue' : 'orange'}>{e.target_type === 'course' ? 'Курс' : 'Урок'}</Badge></td>
+                <td><Badge color={targetTypeColor(e.target_type)}>{targetTypeLabel(e.target_type)}</Badge></td>
                 <td>{e.course_title}</td>
                 <td>{sourceBadge(e.source_type)}</td>
                 <td>{statusBadge(e.status)}</td>
@@ -637,23 +659,26 @@ function EntitlementsTab() {
             displayValue={grantStudentName}
             onChange={(id, name) => { setGrantStudentId(id); setGrantStudentName(name); }}
           />
-          <Select label="Тип цели" value={grantTargetType} onChange={e => setGrantTargetType(e.target.value as 'course' | 'lesson')}>
+          <Select label="Тип цели" value={grantTargetType} onChange={e => setGrantTargetType(e.target.value as 'course' | 'lesson' | 'platform')}>
             <option value="course">Курс</option>
             <option value="lesson">Урок</option>
+            <option value="platform">Полный доступ (вся платформа)</option>
           </Select>
-          <Select label="Курс" value={grantCourseId} onChange={e => { setGrantCourseId(e.target.value); setGrantLessonId(''); }}>
-            <option value="">— Выберите курс —</option>
-            {(courses.data ?? []).map(c => (
-              <option key={c.course_id} value={c.course_id}>{c.title}</option>
-            ))}
-          </Select>
+          {grantTargetType !== 'platform' && (
+            <Select label="Курс" value={grantCourseId} onChange={e => { setGrantCourseId(e.target.value); setGrantLessonId(''); }}>
+              <option value="">— Выберите курс —</option>
+              {(courses.data ?? []).map(c => (
+                <option key={c.course_id} value={c.course_id}>{c.title}</option>
+              ))}
+            </Select>
+          )}
           {grantTargetType === 'lesson' && (
             <LessonSelect courseId={grantCourseId} value={grantLessonId} onChange={setGrantLessonId} />
           )}
           {actionError && <div className={styles.error}>{actionError}</div>}
           <div className={styles.modalActions}>
             <Button variant="secondary" onClick={() => setShowGrant(false)}>Отмена</Button>
-            <Button onClick={handleGrant} loading={grantLoading} disabled={!grantStudentId.trim() || !grantCourseId}>Выдать</Button>
+            <Button onClick={handleGrant} loading={grantLoading} disabled={!grantStudentId.trim() || (grantTargetType !== 'platform' && !grantCourseId)}>Выдать</Button>
           </div>
         </div>
       </Modal>
@@ -662,6 +687,68 @@ function EntitlementsTab() {
 }
 
 /* ========= Main Commerce Page ========= */
+/* ========= Бесплатный доступ (free lessons per course) Tab ========= */
+function FreeAccessTab() {
+  const { data, loading, error, reload } = useApi<AdminCourse[]>(() => getAdminCourses(), []);
+  const platformCourses = (data ?? []).filter(c => c.owner_kind === 'platform');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState('');
+
+  const valueFor = (c: AdminCourse) => drafts[c.course_id] ?? String(c.free_lesson_count ?? 0);
+
+  async function handleSave(c: AdminCourse) {
+    setSavingId(c.course_id); setSaveError('');
+    try {
+      const n = Math.max(0, Math.round(Number(valueFor(c))));
+      await setCourseFreeAccess(c.course_id, n);
+      reload();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Ошибка');
+    } finally { setSavingId(null); }
+  }
+
+  if (loading) return <Spinner />;
+  return (
+    <>
+      <div style={{ fontSize: '0.9rem', color: 'var(--gray-500)', marginBottom: 12 }}>
+        Сколько первых уроков курса доступны бесплатно. Остальные открываются по тарифу «Полный доступ».
+        0 — бесплатных уроков нет.
+      </div>
+      {error && <div className={styles.error}>{error}</div>}
+      {saveError && <div className={styles.error}>{saveError}</div>}
+      {platformCourses.length === 0 ? (
+        <EmptyState icon="🎁" title="Нет курсов платформы" description="Опубликуйте курс, чтобы настроить бесплатные уроки" />
+      ) : (
+        <table className={styles.table}>
+          <thead><tr><th>Курс</th><th>Всего уроков</th><th>Бесплатных уроков</th><th>Действия</th></tr></thead>
+          <tbody>
+            {platformCourses.map(c => (
+              <tr key={c.course_id}>
+                <td className={styles.cellBold}>{c.title}</td>
+                <td>{c.lesson_count}</td>
+                <td style={{ maxWidth: 120 }}>
+                  <Input
+                    aria-label="Бесплатных уроков"
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={valueFor(c)}
+                    onChange={e => setDrafts(d => ({ ...d, [c.course_id]: e.target.value }))}
+                  />
+                </td>
+                <td>
+                  <Button size="sm" onClick={() => handleSave(c)} loading={savingId === c.course_id}>Сохранить</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
 export default function Commerce() {
   const [tab, setTab] = useState<Tab>('offers');
   const [helpOpen, setHelpOpen] = useState(() => localStorage.getItem('commerce_help_dismissed') !== 'true');
@@ -727,6 +814,7 @@ export default function Commerce() {
       {tab === 'offers' && <OffersTab />}
       {tab === 'requests' && <RequestsTab />}
       {tab === 'orders' && <OrdersTab />}
+      {tab === 'free' && <FreeAccessTab />}
       {tab === 'entitlements' && <EntitlementsTab />}
     </div>
   );

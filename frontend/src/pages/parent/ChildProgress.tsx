@@ -50,6 +50,8 @@ export default function ChildProgress() {
       await reloadPaidOffers();
       if (paymentURL) {
         window.location.href = paymentURL;
+      } else {
+        setPayError('Не удалось получить ссылку на оплату');
       }
     } catch (err: unknown) {
       setPayError(err instanceof Error ? err.message : 'Не удалось начать оплату');
@@ -179,8 +181,9 @@ export default function ChildProgress() {
                 <div>
                   <div className={s.paywallTitle}>{offer.title}</div>
                   <div className={s.paywallMeta}>
-                    {offer.course_title ?? 'Курс платформы'}
-                    {offer.lesson_title ? ` / ${offer.lesson_title}` : ''}
+                    {offer.target_type === 'platform'
+                      ? 'Все курсы платформы'
+                      : `${offer.course_title || 'Курс платформы'}${offer.lesson_title ? ` / ${offer.lesson_title}` : ''}`}
                   </div>
                   <div className={s.paywallPrice}>{formatPrice(offer.price_amount_minor, offer.price_currency)}</div>
                 </div>

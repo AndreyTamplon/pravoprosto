@@ -83,18 +83,20 @@ func (s *Service) ListParentChildOffers(ctx context.Context, parentID string, st
 	pendingCutoff := s.pendingOrderCutoff()
 
 	rows, err := s.db.Query(ctx, `
-		select o.id::text, o.title, o.description, o.target_type, o.target_course_id::text, o.target_lesson_id,
-		       o.price_amount_minor, o.price_currency, cr.title, crl.title,
+		select o.id::text, o.title, o.description, o.target_type, coalesce(o.target_course_id::text, ''), o.target_lesson_id,
+		       o.price_amount_minor, o.price_currency, coalesce(cr.title, ''), crl.title,
 		       e.id::text, ord.id::text, tps.payment_url
 		from commercial_offers o
-		join course_revisions cr on cr.course_id = o.target_course_id and cr.is_current = true
+		left join course_revisions cr on cr.course_id = o.target_course_id and cr.is_current = true
 		left join course_revision_lessons crl on crl.course_revision_id = cr.id and crl.lesson_id = o.target_lesson_id
 		left join entitlements e
-		       on e.student_id = $1 and e.status = 'active' and e.target_course_id = o.target_course_id
-		      and (e.target_type = 'course' or (e.target_type = 'lesson' and e.target_lesson_id = o.target_lesson_id))
+		       on e.student_id = $1 and e.status = 'active'
+		      and ((o.target_type = 'platform' and e.target_type = 'platform')
+		           or (e.target_course_id = o.target_course_id and (e.target_type = 'course' or (e.target_type = 'lesson' and e.target_lesson_id = o.target_lesson_id))))
 		left join commercial_orders ord
-		       on ord.student_id = $1 and ord.status = 'awaiting_confirmation' and ord.target_course_id = o.target_course_id
-		      and (ord.target_type = 'course' or (ord.target_type = 'lesson' and ord.target_lesson_id = o.target_lesson_id))
+		       on ord.student_id = $1 and ord.status = 'awaiting_confirmation'
+		      and ((o.target_type = 'platform' and ord.target_type = 'platform')
+		           or (ord.target_course_id = o.target_course_id and (ord.target_type = 'course' or (ord.target_type = 'lesson' and ord.target_lesson_id = o.target_lesson_id))))
 		      and ord.created_at >= $2
 		left join tbank_payment_sessions tps on tps.order_id = ord.id
 		where o.status = 'active'
@@ -154,6 +156,7 @@ func (s *Service) ListParentChildOffers(ctx context.Context, parentID string, st
 	return map[string]any{"items": items}, rows.Err()
 }
 
+// StartParentCheckout lets a linked parent pay for their child's access to an offer.
 func (s *Service) StartParentCheckout(ctx context.Context, parentID string, studentID string, offerID string) (map[string]any, error) {
 	if !s.tbankEnabled() {
 		return nil, ErrBillingNotConfigured
@@ -161,7 +164,22 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 	if err := s.ensureParentChildLink(ctx, parentID, studentID); err != nil {
 		return nil, err
 	}
+	return s.startCheckout(ctx, parentID, studentID, offerID, false)
+}
 
+// StartStudentCheckout lets a student pay for their own access. Restricted to the platform-wide
+// "Полный доступ" product — students cannot self-checkout legacy per-course/per-lesson offers.
+func (s *Service) StartStudentCheckout(ctx context.Context, studentID string, offerID string) (map[string]any, error) {
+	if !s.tbankEnabled() {
+		return nil, ErrBillingNotConfigured
+	}
+	return s.startCheckout(ctx, studentID, studentID, offerID, true)
+}
+
+// startCheckout creates (or reuses) an awaiting order for the offer, opens a T-Bank payment
+// session, and returns the hosted payment URL. payerID is who pays (parent or student); both are
+// stored as the order/session creator. studentSelf restricts the offer to the platform product.
+func (s *Service) startCheckout(ctx context.Context, payerID string, studentID string, offerID string, studentSelf bool) (map[string]any, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -174,7 +192,7 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 	var offer struct {
 		ID               string
 		TargetType       string
-		TargetCourseID   string
+		TargetCourseID   *string
 		TargetLessonID   *string
 		Title            string
 		Description      string
@@ -206,14 +224,22 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 	if offer.Status != "active" {
 		return nil, ErrOfferNotActive
 	}
+	if studentSelf && offer.TargetType != "platform" {
+		return nil, ErrOfferNotCheckoutableByStudent
+	}
+	isPlatform := offer.TargetType == "platform"
 
+	// Block if the student already has access to this offer's target. A platform entitlement
+	// covers everything (so it blocks any offer); for a course/lesson offer we also match its
+	// own target. Prevents charging for already-accessible content (double-charge guard).
 	var entitlementCount int
 	if err := tx.QueryRow(ctx, `
 		select count(*)
 		from entitlements
-		where student_id = $1 and status = 'active' and target_course_id = $2
-		  and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))
-	`, studentID, offer.TargetCourseID, offer.TargetLessonID).Scan(&entitlementCount); err != nil {
+		where student_id = $1 and status = 'active'
+		  and (target_type = 'platform'
+		       or (not $4 and target_course_id = $2 and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))))
+	`, studentID, offer.TargetCourseID, offer.TargetLessonID, isPlatform).Scan(&entitlementCount); err != nil {
 		return nil, err
 	}
 	if entitlementCount > 0 {
@@ -225,10 +251,11 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 	err = tx.QueryRow(ctx, `
 		select id::text
 		from commercial_orders
-		where student_id = $1 and status = 'awaiting_confirmation' and target_course_id = $2
-		  and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))
+		where student_id = $1 and status = 'awaiting_confirmation'
+		  and (($4 and target_type = 'platform')
+		       or (not $4 and target_course_id = $2 and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))))
 		for update
-	`, studentID, offer.TargetCourseID, offer.TargetLessonID).Scan(&orderID)
+	`, studentID, offer.TargetCourseID, offer.TargetLessonID, isPlatform).Scan(&orderID)
 	if err != nil && err != pgx.ErrNoRows {
 		return nil, err
 	}
@@ -240,7 +267,7 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 		update purchase_requests
 		set status = 'processed', processed_at = now(), processed_by_account_id = $3
 		where student_id = $1 and offer_id = $2 and status = 'open'
-	`, studentID, offer.ID, parentID); err != nil {
+	`, studentID, offer.ID, payerID); err != nil {
 		return nil, err
 	}
 	payerEmail := ""
@@ -250,7 +277,7 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 		where account_id = $1 and email is not null and trim(email) <> ''
 		order by updated_at desc
 		limit 1
-	`, parentID).Scan(&payerEmail); err != nil && err != pgx.ErrNoRows {
+	`, payerID).Scan(&payerEmail); err != nil && err != pgx.ErrNoRows {
 		return nil, err
 	}
 
@@ -293,7 +320,7 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 			insert into commercial_orders(student_id, offer_id, status, target_type, target_course_id, target_lesson_id, offer_snapshot_json, price_snapshot_amount_minor, price_snapshot_currency, created_by_account_id)
 			values ($1, $2, 'awaiting_confirmation', $3, $4, $5, $6, $7, $8, $9)
 			returning id::text
-		`, studentID, offer.ID, offer.TargetType, offer.TargetCourseID, offer.TargetLessonID, snapshot, offer.PriceAmountMinor, offer.PriceCurrency, parentID).Scan(&orderID); err != nil {
+		`, studentID, offer.ID, offer.TargetType, offer.TargetCourseID, offer.TargetLessonID, snapshot, offer.PriceAmountMinor, offer.PriceCurrency, payerID).Scan(&orderID); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				return nil, ErrOrderAlreadyPendingForTarget
@@ -312,7 +339,7 @@ func (s *Service) StartParentCheckout(ctx context.Context, parentID string, stud
 		insert into tbank_payment_sessions(order_id, provider_order_id, status, init_request_json, created_by_parent_id)
 		values ($1, $2, 'created', $3, $4)
 		on conflict (order_id) do nothing
-	`, orderID, orderID, requestSnapshot, parentID); err != nil {
+	`, orderID, orderID, requestSnapshot, payerID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -384,7 +411,7 @@ func (s *Service) ProcessTBankNotification(ctx context.Context, payload map[stri
 		StudentID      string
 		Status         string
 		TargetType     string
-		TargetCourseID string
+		TargetCourseID *string
 		TargetLessonID *string
 		AmountMinor    int64
 		Currency       string
@@ -539,16 +566,7 @@ func (s *Service) ProcessTBankNotification(ctx context.Context, payload map[stri
 		return err
 	}
 	if err == pgx.ErrNoRows {
-		if _, err := s.fulfillPurchaseEntitlementTx(ctx, tx, order.CreatedBy, struct {
-			ID             string
-			StudentID      string
-			Status         string
-			TargetType     string
-			TargetCourseID string
-			TargetLessonID *string
-			AmountMinor    int64
-			Currency       string
-		}{
+		if _, err := s.fulfillPurchaseEntitlementTx(ctx, tx, order.CreatedBy, purchaseTarget{
 			ID:             order.ID,
 			StudentID:      order.StudentID,
 			Status:         order.Status,

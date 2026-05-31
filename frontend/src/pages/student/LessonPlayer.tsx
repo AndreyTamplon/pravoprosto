@@ -9,6 +9,7 @@ import {
   goBackInLesson,
   retryLesson,
   abandonLessonSession,
+  ApiRequestError,
 } from '../../api/client';
 import { generateIdempotencyKey } from '../../utils/format';
 import { Button, ComicPanel, Badge, ProgressBar, Modal, Spinner } from '../../components/ui';
@@ -26,6 +27,7 @@ type PlayerScreen =
   | { kind: 'checking' }
   | { kind: 'feedback'; result: AnswerOutcome }
   | { kind: 'complete'; completion: Record<string, unknown> | null }
+  | { kind: 'paywall' }
   | { kind: 'error'; message: string };
 
 /* ===== Main Component ===== */
@@ -63,6 +65,11 @@ export default function LessonPlayer() {
       setCurrentStep(step);
       transitionToStep(step);
     } catch (err) {
+      // Locked behind the platform paywall — show a dedicated screen instead of a generic error.
+      if (err instanceof ApiRequestError && err.code === 'content_locked_paid') {
+        setScreen({ kind: 'paywall' });
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Failed to start lesson';
       setScreen({ kind: 'error', message });
     }
@@ -507,6 +514,25 @@ export default function LessonPlayer() {
                 <Button variant="outline" onClick={() => navigate('/student/courses')} disabled={submitting}>
                   Штаб героя
                 </Button>
+              </div>
+            </div>
+          </ComicPanel>
+        )}
+
+        {/* Paywall */}
+        {screen.kind === 'paywall' && (
+          <ComicPanel>
+            <div className={styles.centerState}>
+              <div className={styles.errorIcon}>💎</div>
+              <div className={styles.centerStateText}>Этот этап входит в полный доступ</div>
+              <div className={styles.errorMessage}>
+                Первый модуль бесплатный. Чтобы открыть все этапы, оформи полный доступ — или попроси родителя.
+              </div>
+              <div className={styles.actionBar}>
+                <Button variant="primary" onClick={() => navigate(`/student/courses/${courseId}`)}>
+                  Открыть полный доступ
+                </Button>
+                <Button variant="outline" onClick={handleClose}>Назад</Button>
               </div>
             </div>
           </ComicPanel>

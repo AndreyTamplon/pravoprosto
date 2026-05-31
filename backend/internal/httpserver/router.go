@@ -493,6 +493,32 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				writeJSON(w, http.StatusCreated, view)
 			}, deps)))
+			sr.Post("/offers/{offerID}/checkout", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				session, _ := sessionFromContext(r.Context())
+				view, err := deps.Commerce.StartStudentCheckout(r.Context(), session.AccountID, chi.URLParam(r, "offerID"))
+				if err != nil {
+					switch err {
+					case commerce.ErrOfferNotFound:
+						writeError(w, http.StatusNotFound, "offer_not_found", "Offer not found", nil)
+					case commerce.ErrOfferNotActive:
+						writeError(w, http.StatusConflict, "offer_not_active", "Offer not active", nil)
+					case commerce.ErrOfferNotCheckoutableByStudent:
+						writeError(w, http.StatusConflict, "offer_not_checkoutable", "This offer cannot be purchased here", nil)
+					case commerce.ErrEntitlementAlreadyActive:
+						writeError(w, http.StatusConflict, "entitlement_already_active", "Entitlement already active", nil)
+					case commerce.ErrOrderAlreadyPendingForTarget:
+						writeError(w, http.StatusConflict, "order_already_pending", "Order already pending", nil)
+					case commerce.ErrBillingNotConfigured:
+						writeError(w, http.StatusServiceUnavailable, "billing_not_configured", "Billing provider is not configured", nil)
+					case commerce.ErrBillingProviderRejected:
+						writeError(w, http.StatusBadGateway, "billing_provider_rejected", "Billing provider rejected operation", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusCreated, view)
+			}, deps)))
 			sr.Post("/lesson-sessions/{sessionID}/next", requireRole("student", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
 				session, _ := sessionFromContext(r.Context())
 				stateVersion, expectedNodeID, err := lessonruntime.DecodeNextRequest(r)
@@ -1265,6 +1291,28 @@ func NewRouter(deps Dependencies) http.Handler {
 						writeError(w, http.StatusUnprocessableEntity, "invalid_offer_target", "Invalid offer target", nil)
 					case commerce.ErrOfferNotFound:
 						writeError(w, http.StatusNotFound, "offer_not_found", "Offer not found", nil)
+					case commerce.ErrActiveOfferConflict:
+						writeError(w, http.StatusConflict, "active_offer_conflict", "Another active offer already exists for this target", nil)
+					default:
+						writeInternalError(w)
+					}
+					return
+				}
+				writeJSON(w, http.StatusOK, view)
+			}, deps)))
+			ar.Put("/commerce/courses/{courseID}/free-access", requireRole("admin", deps, requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+				input, err := commerce.DecodeFreeAccessInput(r)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body", nil)
+					return
+				}
+				view, err := deps.Commerce.SetCourseFreeLessonCount(r.Context(), chi.URLParam(r, "courseID"), input.FreeLessonCount)
+				if err != nil {
+					switch err {
+					case commerce.ErrInvalidFreeLessonCount:
+						writeError(w, http.StatusBadRequest, "invalid_free_lesson_count", "Free lesson count must be >= 0", nil)
+					case commerce.ErrCourseNotFound:
+						writeError(w, http.StatusNotFound, "course_not_found", "Course not found", nil)
 					default:
 						writeInternalError(w)
 					}

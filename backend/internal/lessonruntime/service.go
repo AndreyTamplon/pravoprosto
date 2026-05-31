@@ -147,7 +147,7 @@ func DecodeBackRequest(r *http.Request) (int64, error) {
 func (s *Service) Catalog(ctx context.Context, studentID string) (CatalogView, error) {
 	rows, err := s.db.Query(ctx, `
 		select c.id::text, cr.title, cr.description, null::text as cover_url,
-		       c.course_kind, c.owner_kind,
+		       c.course_kind, c.owner_kind, c.free_lesson_count,
 		       coalesce((
 		           select floor((count(*) filter (where lp.status = 'completed')::decimal / nullif(count(*), 0)::decimal) * 100)::int
 		           from course_progress cp
@@ -169,21 +169,23 @@ func (s *Service) Catalog(ctx context.Context, studentID string) (CatalogView, e
 		var courseID, title, description string
 		var coverURL *string
 		var courseKind, ownerKind string
+		var freeLessonCount int
 		var progressPercent int
-		if err := rows.Scan(&courseID, &title, &description, &coverURL, &courseKind, &ownerKind, &progressPercent); err != nil {
+		if err := rows.Scan(&courseID, &title, &description, &coverURL, &courseKind, &ownerKind, &freeLessonCount, &progressPercent); err != nil {
 			return CatalogView{}, err
 		}
 		platformItems = append(platformItems, map[string]any{
-			"course_id":        courseID,
-			"title":            title,
-			"description":      description,
-			"cover_url":        coverURL,
-			"course_kind":      courseKind,
-			"owner_kind":       ownerKind,
-			"source_section":   "platform_catalog",
-			"progress_percent": progressPercent,
-			"is_new":           false,
-			"badges":           []string{},
+			"course_id":         courseID,
+			"title":             title,
+			"description":       description,
+			"cover_url":         coverURL,
+			"course_kind":       courseKind,
+			"owner_kind":        ownerKind,
+			"source_section":    "platform_catalog",
+			"progress_percent":  progressPercent,
+			"free_lesson_count": freeLessonCount,
+			"is_new":            false,
+			"badges":            []string{},
 		})
 	}
 	if rows.Err() != nil {

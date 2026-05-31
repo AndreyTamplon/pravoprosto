@@ -58,11 +58,13 @@ func NewService(db *pgxpool.Pool, cfg ...platformconfig.Config) *Service {
 	}
 	successURL := strings.TrimSpace(c.TBankSuccessURL)
 	if successURL == "" && baseURL != "" {
-		successURL = baseURL + "/parent"
+		// /success and /fail are public, role-aware result pages — correct for both the parent
+		// and the new student self-checkout flows.
+		successURL = baseURL + "/success"
 	}
 	failURL := strings.TrimSpace(c.TBankFailURL)
 	if failURL == "" && baseURL != "" {
-		failURL = baseURL + "/parent"
+		failURL = baseURL + "/fail"
 	}
 	pendingTTL := c.TBankPendingTTL
 	if pendingTTL <= 0 {
@@ -165,6 +167,15 @@ func DecodeComplimentaryGrantInput(r *http.Request) (ComplimentaryGrantInput, er
 	return input, json.NewDecoder(r.Body).Decode(&input)
 }
 
+type FreeAccessInput struct {
+	FreeLessonCount int `json:"free_lesson_count"`
+}
+
+func DecodeFreeAccessInput(r *http.Request) (FreeAccessInput, error) {
+	var input FreeAccessInput
+	return input, json.NewDecoder(r.Body).Decode(&input)
+}
+
 func (s *Service) ListOffers(ctx context.Context) (map[string]any, error) {
 	rows, err := s.db.Query(ctx, `
 		select o.id::text,
@@ -172,12 +183,12 @@ func (s *Service) ListOffers(ctx context.Context) (map[string]any, error) {
 		       o.description,
 		       o.status,
 		       o.target_type,
-		       o.target_course_id::text,
+		       coalesce(o.target_course_id::text, '') as target_course_id,
 		       o.target_lesson_id,
 		       o.price_amount_minor,
 		       o.price_currency,
 		       o.created_at::text,
-		       coalesce(cr.title, d.title) as course_title,
+		       coalesce(cr.title, d.title, '') as course_title,
 		       coalesce(crl.title, draft_lesson.lesson_title) as lesson_title
 		from commercial_offers o
 		left join course_drafts d on d.course_id = o.target_course_id
@@ -238,7 +249,7 @@ func (s *Service) CreateOffer(ctx context.Context, adminID string, input OfferIn
 		insert into commercial_offers(owner_kind, target_type, target_course_id, target_lesson_id, title, description, price_amount_minor, price_currency, status, created_by_account_id)
 		values ('platform', $1, $2, $3, $4, $5, $6, $7, 'draft', $8)
 		returning id::text
-	`, input.TargetType, input.TargetCourseID, targetLessonID, input.Title, input.Description, input.PriceAmountMinor, strings.ToUpper(input.PriceCurrency), adminID).Scan(&offerID)
+	`, input.TargetType, nullableString(input.TargetCourseID), targetLessonID, input.Title, input.Description, input.PriceAmountMinor, strings.ToUpper(input.PriceCurrency), adminID).Scan(&offerID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && strings.Contains(pgErr.Message, "teacher content cannot be monetized") {
@@ -262,7 +273,7 @@ func (s *Service) UpdateOffer(ctx context.Context, offerID string, input UpdateO
 	var currentStatus, targetType, targetCourseID string
 	var targetLessonID *string
 	if err := tx.QueryRow(ctx, `
-		select status, target_type, target_course_id::text, target_lesson_id
+		select status, target_type, coalesce(target_course_id::text, ''), target_lesson_id
 		from commercial_offers
 		where id = $1
 		for update
@@ -292,6 +303,12 @@ func (s *Service) UpdateOffer(ctx context.Context, offerID string, input UpdateO
 		    updated_at = now()
 		where id = $1
 	`, offerID, input.Title, input.Description, input.PriceAmountMinor, strings.ToUpper(input.PriceCurrency), input.Status, archivedAt); err != nil {
+		// A partial unique index allows only one ACTIVE offer per target (course / lesson /
+		// platform). Activating a second one violates it — surface a friendly conflict.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrActiveOfferConflict
+		}
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -409,7 +426,7 @@ func (s *Service) ListOrders(ctx context.Context, status string, studentID strin
 		       co.id::text,
 		       co.title,
 		       o.target_type,
-		       o.target_course_id::text,
+		       coalesce(o.target_course_id::text, '') as target_course_id,
 		       o.target_lesson_id,
 		       o.status,
 		       o.price_snapshot_amount_minor,
@@ -472,7 +489,7 @@ func (s *Service) CreateManualOrder(ctx context.Context, adminID string, input M
 	var offer struct {
 		ID               string
 		TargetType       string
-		TargetCourseID   string
+		TargetCourseID   *string
 		TargetLessonID   *string
 		Title            string
 		Description      string
@@ -576,16 +593,7 @@ func (s *Service) ManualConfirm(ctx context.Context, orderID string, adminID str
 	}
 	defer tx.Rollback(ctx)
 
-	var order struct {
-		ID             string
-		StudentID      string
-		Status         string
-		TargetType     string
-		TargetCourseID string
-		TargetLessonID *string
-		AmountMinor    int64
-		Currency       string
-	}
+	var order purchaseTarget
 	if err := tx.QueryRow(ctx, `
 		select id::text, student_id::text, status, target_type, target_course_id::text, target_lesson_id, price_snapshot_amount_minor, price_snapshot_currency
 		from commercial_orders
@@ -676,7 +684,7 @@ func (s *Service) ComplimentaryGrant(ctx context.Context, adminID string, input 
 		insert into entitlements(student_id, target_type, target_course_id, target_lesson_id, source_type, order_id, status, granted_by_account_id)
 		values ($1, $2, $3, $4, 'complimentary', null, 'active', $5)
 		returning id::text
-	`, input.StudentID, input.TargetType, input.TargetCourseID, targetLessonID, adminID).Scan(&entitlementID)
+	`, input.StudentID, input.TargetType, nullableString(input.TargetCourseID), targetLessonID, adminID).Scan(&entitlementID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -688,7 +696,7 @@ func (s *Service) ComplimentaryGrant(ctx context.Context, adminID string, input 
 	if _, err := tx.Exec(ctx, `
 		update commercial_orders
 		set status = 'canceled', canceled_at = now(), updated_at = now()
-		where student_id = $1 and target_type = $2 and target_course_id = $3
+		where student_id = $1 and target_type = $2 and coalesce(target_course_id::text, '') = coalesce($3, '')
 		  and coalesce(target_lesson_id, '') = coalesce($4, '')
 		  and status = 'awaiting_confirmation'
 	`, input.StudentID, input.TargetType, input.TargetCourseID, targetLessonID); err != nil {
@@ -701,7 +709,7 @@ func (s *Service) ComplimentaryGrant(ctx context.Context, adminID string, input 
 		    select 1 from commercial_offers o
 		    where o.id = pr.offer_id
 		      and o.target_type = $3
-		      and o.target_course_id = $4
+		      and coalesce(o.target_course_id::text, '') = coalesce($4, '')
 		      and coalesce(o.target_lesson_id, '') = coalesce($5, '')
 		)
 	`, input.StudentID, adminID, input.TargetType, input.TargetCourseID, targetLessonID); err != nil {
@@ -724,7 +732,7 @@ func (s *Service) RevokeEntitlement(ctx context.Context, entitlementID string) (
 	var targetLessonID *string
 	var status string
 	if err := tx.QueryRow(ctx, `
-		select student_id::text, target_type, target_course_id::text, target_lesson_id, status
+		select student_id::text, target_type, coalesce(target_course_id::text, ''), target_lesson_id, status
 		from entitlements
 		where id = $1
 		for update
@@ -744,7 +752,17 @@ func (s *Service) RevokeEntitlement(ctx context.Context, entitlementID string) (
 	`, entitlementID); err != nil {
 		return nil, err
 	}
-	if targetType == "course" {
+	if targetType == "platform" {
+		// Platform access unlocked every course; revoking it re-locks all paid lessons, so
+		// terminate every in-progress session for the student.
+		if _, err := tx.Exec(ctx, `
+			update lesson_sessions
+			set status = 'terminated', terminated_at = now(), termination_reason = 'entitlement_revoked'
+			where student_id = $1 and status = 'in_progress'
+		`, studentID); err != nil {
+			return nil, err
+		}
+	} else if targetType == "course" {
 		if _, err := tx.Exec(ctx, `
 			update lesson_sessions ls
 			set status = 'terminated', terminated_at = now(), termination_reason = 'entitlement_revoked'
@@ -775,7 +793,7 @@ func (s *Service) ListEntitlements(ctx context.Context, studentID, status, targe
 		       e.student_id::text,
 		       coalesce(sp.display_name, ''),
 		       e.target_type,
-		       e.target_course_id::text,
+		       coalesce(e.target_course_id::text, ''),
 		       coalesce(e.target_lesson_id, ''),
 		       coalesce(
 		           (select title from (
@@ -868,16 +886,7 @@ func (s *Service) existingConfirmResult(ctx context.Context, tx pgx.Tx, orderID 
 	}, nil
 }
 
-func (s *Service) fulfillPurchaseEntitlementTx(ctx context.Context, tx pgx.Tx, adminID string, order struct {
-	ID             string
-	StudentID      string
-	Status         string
-	TargetType     string
-	TargetCourseID string
-	TargetLessonID *string
-	AmountMinor    int64
-	Currency       string
-}, paymentID string) (string, error) {
+func (s *Service) fulfillPurchaseEntitlementTx(ctx context.Context, tx pgx.Tx, adminID string, order purchaseTarget, paymentID string) (string, error) {
 	var entitlementID string
 	err := tx.QueryRow(ctx, `
 		insert into entitlements(student_id, target_type, target_course_id, target_lesson_id, source_type, order_id, status, granted_by_account_id)
@@ -920,9 +929,36 @@ func (s *Service) offerView(ctx context.Context, offerID string) (map[string]any
 	return view, err
 }
 
+// SetCourseFreeLessonCount sets how many of a platform course's first lessons are free.
+// 0 disables the free tier for that course. Only platform-owned courses are configurable.
+func (s *Service) SetCourseFreeLessonCount(ctx context.Context, courseID string, count int) (map[string]any, error) {
+	if count < 0 {
+		return nil, ErrInvalidFreeLessonCount
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(courseID)); err != nil {
+		return nil, ErrCourseNotFound
+	}
+	tag, err := s.db.Exec(ctx, `
+		update courses
+		set free_lesson_count = $2, updated_at = now()
+		where id = $1 and deleted_at is null and owner_kind = 'platform'
+	`, courseID, count)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrCourseNotFound
+	}
+	return map[string]any{"course_id": courseID, "free_lesson_count": count}, nil
+}
+
 func normalizeTarget(targetType string, courseID string, lessonID string) (*string, error) {
 	targetType = strings.TrimSpace(targetType)
 	courseID = strings.TrimSpace(courseID)
+	if targetType == "platform" {
+		// Platform-wide product: no course, no lesson.
+		return nil, nil
+	}
 	if courseID == "" {
 		return nil, ErrInvalidOfferTarget
 	}
@@ -953,6 +989,10 @@ func (s *Service) validateOfferTarget(ctx context.Context, targetType string, co
 }
 
 func (s *Service) validateOfferTargetTx(ctx context.Context, tx pgx.Tx, targetType string, courseID string, lessonID *string) error {
+	if targetType == "platform" {
+		// Platform-wide product has no course/lesson target to validate.
+		return nil
+	}
 	var ownerKind string
 	var hasCurrentRevision bool
 	if err := tx.QueryRow(ctx, `
@@ -1036,4 +1076,21 @@ var (
 	ErrBillingProviderRejected        = fmt.Errorf("billing_provider_rejected")
 	ErrInvalidBillingNotification     = fmt.Errorf("invalid_billing_notification")
 	ErrBillingAmountMismatch          = fmt.Errorf("billing_amount_mismatch")
+	ErrActiveOfferConflict            = fmt.Errorf("active_offer_conflict")
+	ErrOfferNotCheckoutableByStudent  = fmt.Errorf("offer_not_checkoutable_by_student")
+	ErrCourseNotFound                 = fmt.Errorf("course_not_found")
+	ErrInvalidFreeLessonCount         = fmt.Errorf("invalid_free_lesson_count")
 )
+
+// purchaseTarget is the shape passed to fulfillPurchaseEntitlementTx. TargetCourseID is a
+// pointer because a platform ("Полный доступ") order/entitlement has no course (NULL).
+type purchaseTarget struct {
+	ID             string
+	StudentID      string
+	Status         string
+	TargetType     string
+	TargetCourseID *string
+	TargetLessonID *string
+	AmountMinor    int64
+	Currency       string
+}

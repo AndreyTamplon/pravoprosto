@@ -25,6 +25,9 @@ function CourseCard({ course, onClick }: { course: CatalogCourse; onClick: () =>
         {course.badges.map((b) => (
           <Badge key={b} variant="teal">{b}</Badge>
         ))}
+        {pct < 100 && course.free_lesson_count != null && course.free_lesson_count > 0 && (
+          <Badge variant="orange">🎁 Первые {course.free_lesson_count} бесплатно</Badge>
+        )}
       </div>
     </ComicPanel>
   );

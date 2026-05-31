@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getCourseTree, createPurchaseRequest, retryLesson } from '../../api/client';
+import { getCourseTree, createPurchaseRequest, startStudentCheckout, retryLesson } from '../../api/client';
 import { Button, Badge, Spinner, EmptyState } from '../../components/ui';
 import { formatPrice } from '../../utils/format';
 import type { LessonNode, LessonAccessState } from '../../api/types';
@@ -37,9 +37,11 @@ function LessonNodeItem({
 }) {
   const navigate = useNavigate();
   const [requesting, setRequesting] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const accessState = node.access.access_state;
   const offer = node.access.offer;
@@ -81,6 +83,25 @@ function LessonNodeItem({
     } catch (err: unknown) {
       setPurchaseError(err instanceof Error ? err.message : 'Ошибка отправки заявки');
       setRequesting(false);
+    }
+  };
+
+  // Self-checkout: redirect the student to the T-Bank hosted payment page for the platform product.
+  const handleCheckout = async () => {
+    if (!offer || checkingOut) return;
+    setCheckingOut(true);
+    setCheckoutError(null);
+    try {
+      const res = await startStudentCheckout(offer.offer_id);
+      if (!res.payment_url) {
+        setCheckoutError('Не удалось получить ссылку на оплату');
+        setCheckingOut(false);
+        return;
+      }
+      window.location.href = res.payment_url;
+    } catch (err: unknown) {
+      setCheckoutError(err instanceof Error ? err.message : 'Не удалось перейти к оплате');
+      setCheckingOut(false);
     }
   };
 
@@ -137,14 +158,27 @@ function LessonNodeItem({
             <Button
               variant="primary"
               size="sm"
+              onClick={handleCheckout}
+              disabled={checkingOut}
+            >
+              {checkingOut ? 'Переход к оплате…' : 'Открыть полный доступ'}
+            </Button>
+          </div>
+          <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 6 }}>
+            или попроси родителя оплатить
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handlePurchase}
               disabled={requesting || offer.has_open_request}
             >
               {offer.has_open_request ? 'Заявка отправлена' : 'Оставить заявку'}
             </Button>
           </div>
-          {purchaseError && (
-            <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 4 }}>{purchaseError}</div>
+          {(checkoutError || purchaseError) && (
+            <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 4 }}>{checkoutError ?? purchaseError}</div>
           )}
         </div>
       )}

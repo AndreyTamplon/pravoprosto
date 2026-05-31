@@ -247,15 +247,44 @@ func buildTreeModules(s *Service, content json.RawMessage, db txLike, ctx contex
 }
 
 func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, studentID string, courseID string, lessonID string) (string, map[string]any, map[string]any, error) {
-	var entitlementID string
+	// Course classification + free-tier inputs. The free tier and the platform-wide
+	// "Полный доступ" product apply ONLY to platform-owned courses. Teacher courses are
+	// gated separately (grant-based, see ensureCourseAccess) and are never monetized by the
+	// platform offer, so platform offers/entitlements must not leak onto them.
+	var ownerKind string
+	var freeLessonCount, sortOrder int
 	err := db.QueryRow(ctx, `
+		select c.owner_kind, c.free_lesson_count, coalesce(crl.sort_order, 0)
+		from courses c
+		left join course_revisions cr on cr.course_id = c.id and cr.is_current = true
+		left join course_revision_lessons crl on crl.course_revision_id = cr.id and crl.lesson_id = $2
+		where c.id = $1 and c.deleted_at is null
+	`, courseID, lessonID).Scan(&ownerKind, &freeLessonCount, &sortOrder)
+	if err != nil && err != pgx.ErrNoRows {
+		return "", nil, nil, err
+	}
+	isPlatformCourse := ownerKind == "platform"
+
+	// Free tier: the first N lessons of a platform course (by sort order in the current
+	// revision) are always free, regardless of any offer — this is what keeps the free module
+	// open even when the platform paywall offer is active. N = courses.free_lesson_count.
+	if isPlatformCourse && freeLessonCount > 0 && sortOrder > 0 && sortOrder <= freeLessonCount {
+		return "free", nil, nil, nil
+	}
+
+	// Active entitlement: a platform entitlement (global) unlocks every platform course;
+	// a course/lesson entitlement unlocks its own target. The platform branch is gated by
+	// isPlatformCourse so it never applies to teacher content.
+	var entitlementID string
+	err = db.QueryRow(ctx, `
 		select id::text
 		from entitlements
-		where student_id = $1 and status = 'active' and target_course_id = $2
-		  and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))
-		order by case when target_type = 'lesson' then 0 else 1 end
+		where student_id = $1 and status = 'active'
+		  and (($4 and target_type = 'platform')
+		       or (target_course_id = $2 and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))))
+		order by case when target_type = 'platform' then 0 when target_type = 'lesson' then 1 else 2 end
 		limit 1
-	`, studentID, courseID, lessonID).Scan(&entitlementID)
+	`, studentID, courseID, lessonID, isPlatformCourse).Scan(&entitlementID)
 	if err == nil {
 		return "granted", nil, nil, nil
 	}
@@ -272,12 +301,13 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 	err = db.QueryRow(ctx, `
 		select id::text, target_type
 		from commercial_orders
-		where student_id = $1 and status = 'awaiting_confirmation' and target_course_id = $2
-		  and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))
+		where student_id = $1 and status = 'awaiting_confirmation'
+		  and (($5 and target_type = 'platform')
+		       or (target_course_id = $2 and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))))
 		  and created_at >= $4
-		order by case when target_type = 'lesson' then 0 else 1 end
+		order by case when target_type = 'platform' then 0 when target_type = 'lesson' then 1 else 2 end
 		limit 1
-	`, studentID, courseID, lessonID, pendingCutoff).Scan(&orderID, &orderTargetType)
+	`, studentID, courseID, lessonID, pendingCutoff, isPlatformCourse).Scan(&orderID, &orderTargetType)
 	if err == nil {
 		return "awaiting_payment_confirmation", nil, map[string]any{
 			"order_id":    orderID,
@@ -289,6 +319,8 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 		return "", nil, nil, err
 	}
 
+	// Active offer (paywall). A platform offer ("Полный доступ") gates any locked lesson of a
+	// platform course and takes priority over legacy per-course/lesson offers for the CTA.
 	var offerID, offerTargetType, title, priceCurrency string
 	var hasOpenRequest bool
 	var priceAmountMinor int64
@@ -300,11 +332,12 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 		           where pr.offer_id = o.id and pr.student_id = $3 and pr.status = 'open'
 		       ) as has_open_request
 		from commercial_offers o
-		where o.status = 'active' and o.target_course_id = $1
-		  and (o.target_type = 'course' or (o.target_type = 'lesson' and o.target_lesson_id = $2))
-		order by case when o.target_type = 'lesson' then 0 else 1 end
+		where o.status = 'active'
+		  and (($4 and o.target_type = 'platform')
+		       or (o.target_course_id = $1 and (o.target_type = 'course' or (o.target_type = 'lesson' and o.target_lesson_id = $2))))
+		order by case when o.target_type = 'platform' then 0 when o.target_type = 'lesson' then 1 else 2 end
 		limit 1
-	`, courseID, lessonID, studentID).Scan(&offerID, &offerTargetType, &title, &priceAmountMinor, &priceCurrency, &hasOpenRequest)
+	`, courseID, lessonID, studentID, isPlatformCourse).Scan(&offerID, &offerTargetType, &title, &priceAmountMinor, &priceCurrency, &hasOpenRequest)
 	if err == nil {
 		return "locked_paid", map[string]any{
 			"offer_id":           offerID,
