@@ -110,9 +110,17 @@ export interface LessonNode {
     access_state: LessonAccessState;
     lesson_id: string;
     offer?: LessonOffer | null;
-    order?: unknown;
+    order?: LessonOrderRef | null;
     support_hint?: string | null;
   };
+}
+
+export interface LessonOrderRef {
+  order_id: string;
+  target_type?: string;
+  status?: string;
+  offer_id?: string;
+  payment_url?: string;
 }
 
 export type LessonAccessState =

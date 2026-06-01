@@ -292,28 +292,37 @@ func (s *Service) resolveCommercialAccessState(ctx context.Context, db txLike, s
 		return "", nil, nil, err
 	}
 
-	var orderID, orderTargetType string
+	var orderID, orderTargetType, orderOfferID string
+	var orderPaymentURL *string
 	pendingTTL := s.config.TBankPendingTTL
 	if pendingTTL <= 0 {
 		pendingTTL = 60 * time.Minute
 	}
 	pendingCutoff := time.Now().UTC().Add(-pendingTTL)
 	err = db.QueryRow(ctx, `
-		select id::text, target_type
-		from commercial_orders
-		where student_id = $1 and status = 'awaiting_confirmation'
-		  and (($5 and target_type = 'platform')
-		       or (target_course_id = $2 and (target_type = 'course' or (target_type = 'lesson' and target_lesson_id = $3))))
-		  and created_at >= $4
-		order by case when target_type = 'platform' then 0 when target_type = 'lesson' then 1 else 2 end
+		select o.id::text, o.target_type, o.offer_id::text, tps.payment_url
+		from commercial_orders o
+		left join tbank_payment_sessions tps on tps.order_id = o.id
+		where o.student_id = $1 and o.status = 'awaiting_confirmation'
+		  and (($5 and o.target_type = 'platform')
+		       or (o.target_course_id = $2 and (o.target_type = 'course' or (o.target_type = 'lesson' and o.target_lesson_id = $3))))
+		  and o.created_at >= $4
+		order by case when o.target_type = 'platform' then 0 when o.target_type = 'lesson' then 1 else 2 end
 		limit 1
-	`, studentID, courseID, lessonID, pendingCutoff, isPlatformCourse).Scan(&orderID, &orderTargetType)
+	`, studentID, courseID, lessonID, pendingCutoff, isPlatformCourse).Scan(&orderID, &orderTargetType, &orderOfferID, &orderPaymentURL)
 	if err == nil {
-		return "awaiting_payment_confirmation", nil, map[string]any{
+		// Include offer_id + payment_url so the student can RESUME an abandoned checkout from the
+		// course tree (otherwise they were stuck on "awaiting" until the order expired via TTL).
+		orderView := map[string]any{
 			"order_id":    orderID,
 			"target_type": orderTargetType,
 			"status":      "awaiting_confirmation",
-		}, nil
+			"offer_id":    orderOfferID,
+		}
+		if orderPaymentURL != nil && strings.TrimSpace(*orderPaymentURL) != "" {
+			orderView["payment_url"] = *orderPaymentURL
+		}
+		return "awaiting_payment_confirmation", nil, orderView, nil
 	}
 	if err != pgx.ErrNoRows {
 		return "", nil, nil, err

@@ -114,6 +114,31 @@ function LessonNodeItem({
     }
   };
 
+  // Resume an abandoned checkout from the "awaiting" state — reuse the existing T-Bank payment URL,
+  // or ask the backend for it (it returns the pending order's URL).
+  const handleResume = async () => {
+    const order = node.access.order;
+    if (!order?.offer_id || checkingOut) return;
+    setCheckingOut(true);
+    setCheckoutError(null);
+    try {
+      if (order.payment_url) {
+        window.location.href = order.payment_url;
+        return;
+      }
+      const res = await startStudentCheckout(order.offer_id);
+      if (!res.payment_url) {
+        setCheckoutError('Не удалось получить ссылку на оплату');
+        setCheckingOut(false);
+        return;
+      }
+      window.location.href = res.payment_url;
+    } catch (err: unknown) {
+      setCheckoutError(err instanceof Error ? err.message : 'Не удалось вернуться к оплате');
+      setCheckingOut(false);
+    }
+  };
+
   return (
     <div className={styles.nodeWrap}>
       {!isFirst && (
@@ -222,6 +247,16 @@ function LessonNodeItem({
       {accessState === 'awaiting_payment_confirmation' && (
         <div className={styles.nodeAction}>
           <Badge variant="yellow">Ожидает подтверждения</Badge>
+          {node.access.order?.offer_id && (
+            <div style={{ marginTop: 6 }}>
+              <Button variant="primary" size="sm" onClick={handleResume} disabled={checkingOut}>
+                {checkingOut ? 'Переход к оплате…' : 'Продолжить оплату'}
+              </Button>
+            </div>
+          )}
+          {checkoutError && (
+            <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 4 }}>{checkoutError}</div>
+          )}
         </div>
       )}
     </div>
