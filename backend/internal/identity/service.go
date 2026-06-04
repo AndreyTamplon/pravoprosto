@@ -360,11 +360,15 @@ func (s *Service) CompleteRoleSelection(ctx context.Context, accountID string, r
 			return "", "", err
 		}
 	case "teacher":
+		// Insert an empty display name on purpose: the teacher onboarding form is the gate
+		// (teacherProfileComplete requires a non-empty display name). Pre-filling it here would
+		// auto-complete the profile and skip the "Добро пожаловать" step. Organization stays
+		// optional — only the display name is required to pass the gate.
 		if _, err := tx.Exec(ctx, `
 			insert into teacher_profiles(account_id, display_name)
-			values ($1, $2)
+			values ($1, '')
 			on conflict (account_id) do nothing
-		`, accountID, displayName); err != nil {
+		`, accountID); err != nil {
 			return "", "", err
 		}
 	}
@@ -703,16 +707,16 @@ func (s *Service) upsertIdentity(ctx context.Context, provider string, identity 
 
 func teacherProfileComplete(ctx context.Context, db *pgxpool.Pool, accountID string) bool {
 	var displayName string
-	var organizationName *string
 	err := db.QueryRow(ctx, `
-		select display_name, organization_name
+		select display_name
 		from teacher_profiles
 		where account_id = $1
-	`, accountID).Scan(&displayName, &organizationName)
+	`, accountID).Scan(&displayName)
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(displayName) != "" && organizationName != nil && strings.TrimSpace(*organizationName) != ""
+	// Organization is optional — a non-empty display name is enough to consider the profile complete.
+	return strings.TrimSpace(displayName) != ""
 }
 
 func defaultDisplayName(ctx context.Context, tx pgx.Tx, accountID string) string {

@@ -62,3 +62,20 @@
   color: var(--gray-500);
   line-height: 1.5;
 }
+
+.consent {
+  margin-top: 16px;
+  font-size: 0.78rem;
+  color: var(--gray-500);
+  line-height: 1.5;
+}
+
+.consent a {
+  color: var(--blue);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.consent a:hover {
+  text-decoration: underline;
+}

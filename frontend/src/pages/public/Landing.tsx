@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { getPromoCourses } from '../../api/client';
@@ -169,6 +169,11 @@ export default function Landing() {
           <p className={styles.footerNote}>
             SmartGo School — современная образовательная платформа для детей, родителей и учителей.
           </p>
+          <nav className={styles.footerLinks}>
+            <Link to="/support" className={styles.footerLink}>Поддержка</Link>
+            <Link to="/offer" className={styles.footerLink}>Публичная оферта</Link>
+            <Link to="/privacy" className={styles.footerLink}>Политика конфиденциальности</Link>
+          </nav>
         </div>
       </footer>
     </div>

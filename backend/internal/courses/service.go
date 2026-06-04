@@ -161,15 +161,16 @@ func DecodePreviewStart(r *http.Request) (PreviewStartInput, error) {
 
 func (s *Service) TeacherProfileReady(ctx context.Context, teacherID string) (bool, error) {
 	var displayName string
-	var organizationName *string
 	if err := s.db.QueryRow(ctx, `
-		select display_name, organization_name
+		select display_name
 		from teacher_profiles
 		where account_id = $1
-	`, teacherID).Scan(&displayName, &organizationName); err != nil {
+	`, teacherID).Scan(&displayName); err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(displayName) != "" && organizationName != nil && strings.TrimSpace(*organizationName) != "", nil
+	// Organization is optional (the onboarding form marks it as such) — only a non-empty
+	// display name is required to unlock the teacher cabinet.
+	return strings.TrimSpace(displayName) != "", nil
 }
 
 func (s *Service) CreateCourse(ctx context.Context, ownerRole string, ownerID string, input CreateCourseInput) (map[string]string, error) {

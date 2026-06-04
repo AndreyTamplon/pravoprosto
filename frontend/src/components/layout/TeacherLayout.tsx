@@ -28,6 +28,10 @@ export default function TeacherLayout() {
         <span className={styles.navIcon}>👤</span>
         Профиль
       </NavLink>
+      <NavLink to="/support" className={navLinkCls} onClick={() => setMenuOpen(false)}>
+        <span className={styles.navIcon}>💬</span>
+        Поддержка
+      </NavLink>
     </>
   );
 

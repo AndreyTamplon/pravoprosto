@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ComicPanel, BrandLogo } from '../../components/ui';
 import styles from './AuthPage.module.css';
@@ -26,6 +26,12 @@ export default function AuthPage() {
 
         <p className={styles.hint}>
           Нет аккаунта? Он создастся автоматически при первом входе
+        </p>
+
+        <p className={styles.consent}>
+          Входя в платформу, вы принимаете{' '}
+          <Link to="/offer">Публичную оферту</Link> и{' '}
+          <Link to="/privacy">Политику конфиденциальности</Link>.
         </p>
       </ComicPanel>
     </div>

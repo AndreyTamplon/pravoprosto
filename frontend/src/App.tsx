@@ -14,6 +14,9 @@ const StudentOnboarding = lazy(() => import('./pages/public/StudentOnboarding'))
 const TeacherOnboarding = lazy(() => import('./pages/public/TeacherOnboarding'));
 const PaymentSuccess = lazy(() => import('./pages/public/PaymentSuccess'));
 const PaymentFail = lazy(() => import('./pages/public/PaymentFail'));
+const Support = lazy(() => import('./pages/public/Support'));
+const Offer = lazy(() => import('./pages/public/Offer'));
+const Privacy = lazy(() => import('./pages/public/Privacy'));
 
 // Student
 const StudentCatalog = lazy(() => import('./pages/student/Catalog'));
@@ -240,6 +243,11 @@ export default function App() {
             {/* Payment result pages (T-Bank redirects here after checkout) */}
             <Route path="/success" element={<PaymentSuccess />} />
             <Route path="/fail" element={<PaymentFail />} />
+
+            {/* Support & legal (public — reachable before login) */}
+            <Route path="/support" element={<Support />} />
+            <Route path="/offer" element={<Offer />} />
+            <Route path="/privacy" element={<Privacy />} />
 
             {/* 404 */}
             <Route path="*" element={

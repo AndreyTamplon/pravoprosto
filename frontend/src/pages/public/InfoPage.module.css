@@ -1,0 +1,245 @@
+.page {
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: var(--font-family);
+  color: var(--dark);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  background: rgba(248, 250, 251, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: var(--border-thin);
+}
+
+.logoLink {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: var(--border);
+  border-radius: var(--radius-full);
+  background: var(--white);
+  box-shadow: var(--shadow-comic-xs);
+  font-family: var(--font-family);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--dark);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.backBtn:hover {
+  box-shadow: var(--shadow-comic-sm);
+  transform: translateY(-1px);
+}
+
+.container {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+.card {
+  background: var(--white);
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-comic);
+  padding: 36px 40px;
+}
+
+.title {
+  font-family: var(--font-family-heading);
+  font-size: 1.9rem;
+  font-weight: 800;
+  margin: 0 0 6px;
+  color: var(--dark);
+}
+
+.subtitle {
+  font-size: 0.95rem;
+  color: var(--gray-500);
+  margin: 0 0 28px;
+}
+
+/* ---- Legal document typography ---- */
+.doc h2 {
+  font-family: var(--font-family-heading);
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin: 28px 0 10px;
+  color: var(--blue-dark);
+}
+
+.doc p {
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 0 12px;
+  color: var(--dark-light);
+}
+
+.doc ul,
+.doc ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.doc li {
+  font-size: 1rem;
+  line-height: 1.55;
+  margin-bottom: 6px;
+  color: var(--dark-light);
+}
+
+/* ---- FAQ accordion ---- */
+.faqSection {
+  margin-bottom: 28px;
+}
+
+.faqSectionTitle {
+  font-family: var(--font-family-heading);
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin: 0 0 12px;
+  color: var(--dark);
+}
+
+.faqItem {
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--gray-100);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.faqQuestion {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 18px;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--dark);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.faqQuestion::-webkit-details-marker {
+  display: none;
+}
+
+.faqQuestion::after {
+  content: '+';
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--blue);
+  transition: var(--transition);
+}
+
+.faqItem[open] .faqQuestion::after {
+  transform: rotate(45deg);
+}
+
+.faqAnswer {
+  padding: 0 18px 16px;
+  font-size: 0.97rem;
+  line-height: 1.6;
+  color: var(--dark-light);
+}
+
+.faqAnswer ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.faqAnswer li {
+  margin-bottom: 6px;
+}
+
+/* ---- Contacts block ---- */
+.contacts {
+  margin-top: 32px;
+  padding: 20px 22px;
+  background: var(--gray-100);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.contactsTitle {
+  font-weight: 800;
+  font-size: 1.05rem;
+  margin: 0 0 10px;
+  color: var(--dark);
+}
+
+.contactRow {
+  font-size: 0.97rem;
+  line-height: 1.6;
+  color: var(--dark-light);
+  margin-bottom: 4px;
+}
+
+.contactRow a {
+  color: var(--blue);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.contactRow a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Cross-links between docs ---- */
+.docLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.docLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: var(--border);
+  border-radius: var(--radius-full);
+  background: var(--white);
+  box-shadow: var(--shadow-comic-xs);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--dark);
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+.docLink:hover {
+  box-shadow: var(--shadow-comic-sm);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 560px) {
+  .card {
+    padding: 24px 20px;
+  }
+  .title {
+    font-size: 1.5rem;
+  }
+  .container {
+    padding: 20px 12px 48px;
+  }
+}
